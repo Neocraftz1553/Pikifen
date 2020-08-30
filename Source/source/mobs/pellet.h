@@ -15,15 +15,6 @@
 #include "../mob_types/pikmin_type.h"
 #include "mob.h"
 
-enum PELLET_STATES {
-    PELLET_STATE_IDLE_WAITING,
-    PELLET_STATE_IDLE_MOVING,
-    PELLET_STATE_IDLE_STUCK,
-    PELLET_STATE_BEING_DELIVERED,
-    
-    N_PELLET_STATES,
-};
-
 
 /* ----------------------------------------------------------------------------
  * A pellet can be delivered to an Onion in
@@ -33,10 +24,15 @@ enum PELLET_STATES {
  */
 class pellet : public mob {
 public:
+    //What type of pellet it is.
     pellet_type* pel_type;
     
+    //Constructor.
     pellet(const point &pos, pellet_type* type, const float angle);
-    virtual void draw_mob(bitmap_effect_manager* effect_manager = NULL);
+    
+    //Mob drawing routine.
+    virtual void draw_mob();
 };
+
 
 #endif //ifndef PELLET_INCLUDED

@@ -16,66 +16,10 @@
 #include "../mob_types/leader_type.h"
 #include "mob.h"
 
+
 class pikmin;
 
-using namespace std;
-
-enum LEADER_STATES {
-    LEADER_STATE_IDLING,
-    LEADER_STATE_ACTIVE,
-    LEADER_STATE_WHISTLING,
-    LEADER_STATE_PUNCHING,
-    LEADER_STATE_HOLDING,
-    LEADER_STATE_DISMISSING,
-    LEADER_STATE_SPRAYING,
-    LEADER_STATE_PAIN,
-    LEADER_STATE_INACTIVE_PAIN,
-    LEADER_STATE_KNOCKED_BACK,
-    LEADER_STATE_INACTIVE_KNOCKED_BACK,
-    LEADER_STATE_DYING,
-    LEADER_STATE_IN_GROUP_CHASING,
-    LEADER_STATE_IN_GROUP_STOPPED,
-    LEADER_STATE_GOING_TO_PLUCK,
-    LEADER_STATE_PLUCKING,
-    LEADER_STATE_INACTIVE_GOING_TO_PLUCK,
-    LEADER_STATE_INACTIVE_PLUCKING,
-    LEADER_STATE_SLEEPING_WAITING,
-    LEADER_STATE_SLEEPING_MOVING,
-    LEADER_STATE_SLEEPING_STUCK,
-    LEADER_STATE_INACTIVE_SLEEPING_WAITING,
-    LEADER_STATE_INACTIVE_SLEEPING_MOVING,
-    LEADER_STATE_INACTIVE_SLEEPING_STUCK,
-    //Time during which the leader is getting up.
-    LEADER_STATE_WAKING_UP,
-    //Time during which the leader is getting up.
-    LEADER_STATE_INACTIVE_WAKING_UP,
-    LEADER_STATE_HELD,
-    LEADER_STATE_THROWN,
-    LEADER_STATE_DRINKING,
-    
-    N_LEADER_STATES,
-    
-};
-
-enum LEADER_ANIMATIONS {
-    LEADER_ANIM_IDLING,
-    LEADER_ANIM_WALKING,
-    LEADER_ANIM_PLUCKING,
-    LEADER_ANIM_GETTING_UP,
-    LEADER_ANIM_DISMISSING,
-    LEADER_ANIM_THROWING,
-    LEADER_ANIM_WHISTLING,
-    LEADER_ANIM_PUNCHING,
-    LEADER_ANIM_LYING,
-    LEADER_ANIM_PAIN,
-    LEADER_ANIM_KNOCKED_DOWN,
-    LEADER_ANIM_SPRAYING,
-    LEADER_ANIM_DRINKING,
-};
-
-const float LEADER_HELD_MOB_ANGLE = TAU / 2;
-const float LEADER_HELD_MOB_DIST = 1.2f;
-const float LEADER_INVULN_PERIOD = 1.5f;
+using std::size_t;
 
 
 /* ----------------------------------------------------------------------------
@@ -83,32 +27,51 @@ const float LEADER_INVULN_PERIOD = 1.5f;
  * is controlled by the player.
  */
 class leader : public mob {
-private:
-    size_t get_dismiss_rows(const size_t n_members);
-    
 public:
+    //What type of leader it is.
     leader_type* lea_type;
     
+    //Is it active? i.e. being controlled by a player.
+    bool active;
+    //Is it currently auto-plucking?
     bool auto_plucking;
+    //Pikmin it wants to pluck.
     pikmin* pluck_target;
+    //Has the player asked for the auto-plucking to stop?
     bool queued_pluck_cancel;
-    
+    //Is the leader currently in the walking animation?
     bool is_in_walking_anim;
     
-    leader(const point &pos, leader_type* type, const float angle);
-    
-    virtual void draw_mob(bitmap_effect_manager* effect_manager = NULL);
-    
-    void signal_group_move_start();
-    void signal_group_move_end();
+    //Dismiss current group.
     void dismiss();
+    //Signal to every group member that swarm mode started.
+    void signal_swarm_start() const;
+    //Signal to every group member that swarm mode ended.
+    void signal_swarm_end() const;
+    //Starts the trail behind a thrown leader.
+    void start_throw_trail();
+    //Start whistling.
     void start_whistling();
+    //Stop whistling.
     void stop_whistling();
+    //Change the current held Pikmin for another.
     void swap_held_pikmin(mob* new_pik);
     
-    virtual bool can_receive_status(status_type* s);
-    virtual void tick_class_specifics();
+    //Constructor.
+    leader(const point &pos, leader_type* type, const float angle);
     
+    //Can the mob currently receive the specified status effect?
+    virtual bool can_receive_status(status_type* s) const;
+    //Mob drawing routine.
+    virtual void draw_mob();
+    
+protected:
+    //Tick class-specific logic.
+    virtual void tick_class_specifics(const float delta_t);
+    
+private:
+    //Returns how many rows are needed for all members' dismissal.
+    size_t get_dismiss_rows(const size_t n_members) const;
 };
 
 

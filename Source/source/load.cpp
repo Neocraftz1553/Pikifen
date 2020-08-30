@@ -14,107 +14,127 @@
 
 #include "const.h"
 #include "drawing.h"
-#include "editors/area_editor/editor.h"
 #include "functions.h"
+#include "game.h"
 #include "init.h"
 #include "utils/string_utils.h"
-#include "vars.h"
+
+
+using std::set;
 
 
 /* ----------------------------------------------------------------------------
  * Loads an area into memory.
- * name:            Name of the area's folder.
- * load_for_editor: If true, skips loading some things that the area editor
- *   won't need.
- * from_backup:     If true, load from a backup, if any.
+ * name:
+ *   Name of the area's folder.
+ * load_for_editor:
+ *   If true, skips loading some things that the area editor won't need.
+ * from_backup:
+ *   If true, load from a backup, if any.
  */
 void load_area(
     const string &name, const bool load_for_editor, const bool from_backup
 ) {
-
-    cur_area_data.clear();
+    if(game.perf_mon) {
+        game.perf_mon->start_measurement("Area -- Data");
+    }
+    
+    game.cur_area_data.clear();
     
     string geometry_file_name;
     string data_file_name;
+    string sanitized_area_name = sanitize_file_name(name);
     if(from_backup) {
         geometry_file_name =
-            USER_AREA_DATA_FOLDER_PATH + "/" + name +
+            USER_AREA_DATA_FOLDER_PATH + "/" + sanitized_area_name +
             "/Geometry_backup.txt";
         data_file_name =
-            USER_AREA_DATA_FOLDER_PATH + "/" + name +
+            USER_AREA_DATA_FOLDER_PATH + "/" + sanitized_area_name +
             "/Data_backup.txt";
     } else {
         geometry_file_name =
-            AREAS_FOLDER_PATH + "/" + name + "/Geometry.txt";
+            AREAS_FOLDER_PATH + "/" + sanitized_area_name + "/Geometry.txt";
         data_file_name =
-            AREAS_FOLDER_PATH + "/" + name + "/Data.txt";
+            AREAS_FOLDER_PATH + "/" + sanitized_area_name + "/Data.txt";
     }
     
-    data_node data_file = load_data_file(data_file_name);
+    //First, load the area's configuration data.
+    data_node data_file(data_file_name);
+    reader_setter rs(&data_file);
     
-    cur_area_data.name =
-        data_file.get_child_by_name("name")->get_value_or_default(name);
-    cur_area_data.subtitle =
-        data_file.get_child_by_name("subtitle")->value;
-    cur_area_data.creator =
-        data_file.get_child_by_name("creator")->value;
-    cur_area_data.version =
-        data_file.get_child_by_name("version")->value;
-    cur_area_data.notes =
-        data_file.get_child_by_name("notes")->value;
-    cur_area_data.spray_amounts =
-        data_file.get_child_by_name("spray_amounts")->value;
-        
-    if(loading_text_bmp) al_destroy_bitmap(loading_text_bmp);
-    if(loading_subtext_bmp) al_destroy_bitmap(loading_subtext_bmp);
-    loading_text_bmp = NULL;
-    loading_subtext_bmp = NULL;
+    data_node* weather_node = NULL;
     
-    draw_loading_screen(cur_area_data.name, cur_area_data.subtitle, 1.0);
+    rs.set("name", game.cur_area_data.name);
+    rs.set("subtitle", game.cur_area_data.subtitle);
+    rs.set("maker", game.cur_area_data.maker);
+    rs.set("version", game.cur_area_data.version);
+    rs.set("notes", game.cur_area_data.notes);
+    rs.set("spray_amounts", game.cur_area_data.spray_amounts);
+    rs.set("weather", game.cur_area_data.weather_name, &weather_node);
+    rs.set("bg_bmp", game.cur_area_data.bg_bmp_file_name);
+    rs.set("bg_color", game.cur_area_data.bg_color);
+    rs.set("bg_dist", game.cur_area_data.bg_dist);
+    rs.set("bg_zoom", game.cur_area_data.bg_bmp_zoom);
+    
+    if(game.loading_text_bmp) al_destroy_bitmap(game.loading_text_bmp);
+    if(game.loading_subtext_bmp) al_destroy_bitmap(game.loading_subtext_bmp);
+    game.loading_text_bmp = NULL;
+    game.loading_subtext_bmp = NULL;
+    
+    if(game.perf_mon) {
+        game.perf_mon->finish_measurement();
+    }
+    
+    draw_loading_screen(
+        game.cur_area_data.name, game.cur_area_data.subtitle, 1.0
+    );
     al_flip_display();
     
-    cur_area_data.weather_name = data_file.get_child_by_name("weather")->value;
     if(!load_for_editor) {
     
-        if(cur_area_data.weather_name.empty()) {
-            cur_area_data.weather_condition = weather();
+        if(game.perf_mon) {
+            game.perf_mon->start_measurement("Area -- Initial assets");
+        }
+        
+        if(game.cur_area_data.weather_name.empty()) {
+            game.cur_area_data.weather_condition = weather();
             
         } else if(
-            weather_conditions.find(cur_area_data.weather_name) ==
-            weather_conditions.end()
+            game.weather_conditions.find(game.cur_area_data.weather_name) ==
+            game.weather_conditions.end()
         ) {
             log_error(
                 "Area " + name +
-                " refers to a non-existing weather condition, \"" +
-                cur_area_data.weather_name + "\"!",
-                &data_file
+                " refers to an unknown weather condition, \"" +
+                game.cur_area_data.weather_name + "\"!",
+                weather_node
             );
-            cur_area_data.weather_condition = weather();
+            game.cur_area_data.weather_condition = weather();
             
         } else {
-            cur_area_data.weather_condition =
-                weather_conditions[cur_area_data.weather_name];
+            game.cur_area_data.weather_condition =
+                game.weather_conditions[game.cur_area_data.weather_name];
                 
         }
     }
     
-    cur_area_data.bg_bmp_file_name =
-        data_file.get_child_by_name("bg_bmp")->value;
-    if(!load_for_editor && !cur_area_data.bg_bmp_file_name.empty()) {
-        cur_area_data.bg_bmp =
-            textures.get(cur_area_data.bg_bmp_file_name, &data_file);
+    if(!load_for_editor && !game.cur_area_data.bg_bmp_file_name.empty()) {
+        game.cur_area_data.bg_bmp =
+            game.textures.get(game.cur_area_data.bg_bmp_file_name, &data_file);
     }
-    cur_area_data.bg_color =
-        s2c(data_file.get_child_by_name("bg_color")->value);
-    cur_area_data.bg_dist =
-        s2f(data_file.get_child_by_name("bg_dist")->get_value_or_default("2"));
-    cur_area_data.bg_bmp_zoom =
-        s2f(data_file.get_child_by_name("bg_zoom")->get_value_or_default("1"));
-        
-        
+    
+    if(!load_for_editor && game.perf_mon) {
+        game.perf_mon->finish_measurement();
+    }
+    
+    //Time to load the geometry.
     data_node geometry_file = load_data_file(geometry_file_name);
     
     //Vertexes.
+    if(game.perf_mon) {
+        game.perf_mon->start_measurement("Area -- Vertexes");
+    }
+    
     size_t n_vertexes =
         geometry_file.get_child_by_name(
             "vertexes"
@@ -126,13 +146,21 @@ void load_area(
             )->get_child_by_name("v", v);
         vector<string> words = split(vertex_data->value);
         if(words.size() == 2) {
-            cur_area_data.vertexes.push_back(
+            game.cur_area_data.vertexes.push_back(
                 new vertex(s2f(words[0]), s2f(words[1]))
             );
         }
     }
     
+    if(game.perf_mon) {
+        game.perf_mon->finish_measurement();
+    }
+    
     //Edges.
+    if(game.perf_mon) {
+        game.perf_mon->start_measurement("Area -- Edges");
+    }
+    
     size_t n_edges =
         geometry_file.get_child_by_name(
             "edges"
@@ -157,10 +185,18 @@ void load_area(
         new_edge->vertex_nrs[0] = s2i(v_nrs[0]);
         new_edge->vertex_nrs[1] = s2i(v_nrs[1]);
         
-        cur_area_data.edges.push_back(new_edge);
+        game.cur_area_data.edges.push_back(new_edge);
+    }
+    
+    if(game.perf_mon) {
+        game.perf_mon->finish_measurement();
     }
     
     //Sectors.
+    if(game.perf_mon) {
+        game.perf_mon->start_measurement("Area -- Sectors");
+    }
+    
     size_t n_sectors =
         geometry_file.get_child_by_name(
             "sectors"
@@ -173,7 +209,9 @@ void load_area(
         sector* new_sector = new sector();
         
         new_sector->type =
-            sector_types.get_nr(sector_data->get_child_by_name("type")->value);
+            game.sector_types.get_nr(
+                sector_data->get_child_by_name("type")->value
+            );
         if(new_sector->type == 255) new_sector->type = SECTOR_TYPE_NORMAL;
         new_sector->is_bottomless_pit =
             s2b(
@@ -218,9 +256,9 @@ void load_area(
                 get_value_or_default("255 255 255")
             );
             
-        if(!new_sector->fade) {
+        if(!new_sector->fade && !new_sector->is_bottomless_pit) {
             new_sector->texture_info.bitmap =
-                textures.get(new_sector->texture_info.file_name, NULL);
+                game.textures.get(new_sector->texture_info.file_name, NULL);
         }
         
         data_node* hazards_node = sector_data->get_child_by_name("hazards");
@@ -228,17 +266,13 @@ void load_area(
             semicolon_list_to_vector(hazards_node->value);
         for(size_t h = 0; h < hazards_strs.size(); ++h) {
             string hazard_name = hazards_strs[h];
-            if(hazards.find(hazard_name) == hazards.end()) {
+            if(game.hazards.find(hazard_name) == game.hazards.end()) {
                 log_error(
                     "Unknown hazard \"" + hazard_name +
                     "\"!", hazards_node
                 );
             } else {
-                new_sector->hazards.push_back(&(hazards[hazard_name]));
-                if(hazards[hazard_name].associated_liquid) {
-                    new_sector->associated_liquid =
-                        hazards[hazard_name].associated_liquid;
-                }
+                new_sector->hazards.push_back(&(game.hazards[hazard_name]));
             }
         }
         new_sector->hazards_str = hazards_node->value;
@@ -249,11 +283,19 @@ void load_area(
                 )->get_value_or_default("true")
             );
             
-        cur_area_data.sectors.push_back(new_sector);
+        game.cur_area_data.sectors.push_back(new_sector);
+    }
+    
+    if(game.perf_mon) {
+        game.perf_mon->finish_measurement();
     }
     
     //Mobs.
-    vector<pair<size_t, size_t> > mob_links_buffer;
+    if(game.perf_mon) {
+        game.perf_mon->start_measurement("Area -- Object generators");
+    }
+    
+    vector<std::pair<size_t, size_t> > mob_links_buffer;
     size_t n_mobs =
         geometry_file.get_child_by_name("mobs")->get_nr_of_children();
         
@@ -271,7 +313,7 @@ void load_area(
             );
         mob_ptr->vars = mob_node->get_child_by_name("vars")->value;
         
-        mob_ptr->category = mob_categories.get_from_name(mob_node->name);
+        mob_ptr->category = game.mob_categories.get_from_name(mob_node->name);
         if(!mob_ptr->category) continue;
         
         string mt = mob_node->get_child_by_name("type")->value;
@@ -280,7 +322,7 @@ void load_area(
         vector<string> link_strs =
             split(mob_node->get_child_by_name("links")->value);
         for(size_t l = 0; l < link_strs.size(); ++l) {
-            mob_links_buffer.push_back(make_pair(m, s2i(link_strs[l])));
+            mob_links_buffer.push_back(std::make_pair(m, s2i(link_strs[l])));
         }
         
         bool problem = false;
@@ -306,13 +348,13 @@ void load_area(
             log_error(
                 "Unknown mob category \"" + mob_node->name + "\"!", mob_node
             );
-            mob_ptr->category = mob_categories.get(MOB_CATEGORY_NONE);
+            mob_ptr->category = game.mob_categories.get(MOB_CATEGORY_NONE);
             problem = true;
             
         }
         
         if(!problem) {
-            cur_area_data.mob_generators.push_back(mob_ptr);
+            game.cur_area_data.mob_generators.push_back(mob_ptr);
         } else {
             delete mob_ptr;
         }
@@ -321,13 +363,21 @@ void load_area(
     for(size_t l = 0; l < mob_links_buffer.size(); ++l) {
         size_t f = mob_links_buffer[l].first;
         size_t s = mob_links_buffer[l].second;
-        cur_area_data.mob_generators[f]->links.push_back(
-            cur_area_data.mob_generators[s]
+        game.cur_area_data.mob_generators[f]->links.push_back(
+            game.cur_area_data.mob_generators[s]
         );
-        cur_area_data.mob_generators[f]->link_nrs.push_back(s);
+        game.cur_area_data.mob_generators[f]->link_nrs.push_back(s);
+    }
+    
+    if(game.perf_mon) {
+        game.perf_mon->finish_measurement();
     }
     
     //Path stops.
+    if(game.perf_mon) {
+        game.perf_mon->start_measurement("Area -- Paths");
+    }
+    
     size_t n_stops =
         geometry_file.get_child_by_name("path_stops")->get_nr_of_children();
     for(size_t s = 0; s < n_stops; ++s) {
@@ -356,11 +406,18 @@ void load_area(
             
         }
         
-        cur_area_data.path_stops.push_back(s_ptr);
+        game.cur_area_data.path_stops.push_back(s_ptr);
     }
     
+    if(game.perf_mon) {
+        game.perf_mon->finish_measurement();
+    }
     
     //Tree shadows.
+    if(game.perf_mon) {
+        game.perf_mon->start_measurement("Area -- Tree shadows");
+    }
+    
     size_t n_shadows =
         geometry_file.get_child_by_name("tree_shadows")->get_nr_of_children();
     for(size_t s = 0; s < n_shadows; ++s) {
@@ -392,45 +449,60 @@ void load_area(
                 )->get_value_or_default("255")
             );
         s_ptr->file_name = shadow_node->get_child_by_name("file")->value;
-        s_ptr->bitmap = textures.get(s_ptr->file_name, NULL);
+        s_ptr->bitmap = game.textures.get(s_ptr->file_name, NULL);
         
         words = split(shadow_node->get_child_by_name("sway")->value);
         s_ptr->sway.x = (words.size() >= 1 ? s2f(words[0]) : 0);
         s_ptr->sway.y = (words.size() >= 2 ? s2f(words[1]) : 0);
         
-        if(s_ptr->bitmap == bmp_error && !load_for_editor) {
+        if(s_ptr->bitmap == game.bmp_error && !load_for_editor) {
             log_error(
                 "Unknown tree shadow texture \"" + s_ptr->file_name + "\"!",
                 shadow_node
             );
         }
         
-        cur_area_data.tree_shadows.push_back(s_ptr);
+        game.cur_area_data.tree_shadows.push_back(s_ptr);
         
     }
     
+    if(game.perf_mon) {
+        game.perf_mon->finish_measurement();
+    }
     
     //Set up stuff.
-    for(size_t e = 0; e < cur_area_data.edges.size(); ++e) {
-        cur_area_data.fix_edge_pointers(cur_area_data.edges[e]);
+    if(game.perf_mon) {
+        game.perf_mon->start_measurement("Area -- Geometry calculations");
     }
-    for(size_t s = 0; s < cur_area_data.sectors.size(); ++s) {
-        cur_area_data.connect_sector_edges(cur_area_data.sectors[s]);
+    
+    for(size_t e = 0; e < game.cur_area_data.edges.size(); ++e) {
+        game.cur_area_data.fix_edge_pointers(
+            game.cur_area_data.edges[e]
+        );
     }
-    for(size_t v = 0; v < cur_area_data.vertexes.size(); ++v) {
-        cur_area_data.connect_vertex_edges(cur_area_data.vertexes[v]);
+    for(size_t s = 0; s < game.cur_area_data.sectors.size(); ++s) {
+        game.cur_area_data.connect_sector_edges(
+            game.cur_area_data.sectors[s]
+        );
     }
-    for(size_t s = 0; s < cur_area_data.path_stops.size(); ++s) {
-        cur_area_data.fix_path_stop_pointers(cur_area_data.path_stops[s]);
+    for(size_t v = 0; v < game.cur_area_data.vertexes.size(); ++v) {
+        game.cur_area_data.connect_vertex_edges(
+            game.cur_area_data.vertexes[v]
+        );
     }
-    for(size_t s = 0; s < cur_area_data.path_stops.size(); ++s) {
-        cur_area_data.path_stops[s]->calculate_dists();
+    for(size_t s = 0; s < game.cur_area_data.path_stops.size(); ++s) {
+        game.cur_area_data.fix_path_stop_pointers(
+            game.cur_area_data.path_stops[s]
+        );
+    }
+    for(size_t s = 0; s < game.cur_area_data.path_stops.size(); ++s) {
+        game.cur_area_data.path_stops[s]->calculate_dists();
     }
     if(!load_for_editor) {
         //Fade sectors that also fade brightness should be
         //at midway between the two neighbors.
-        for(size_t s = 0; s < cur_area_data.sectors.size(); ++s) {
-            sector* s_ptr = cur_area_data.sectors[s];
+        for(size_t s = 0; s < game.cur_area_data.sectors.size(); ++s) {
+            sector* s_ptr = game.cur_area_data.sectors[s];
             if(s_ptr->fade) {
                 sector* n1 = NULL;
                 sector* n2 = NULL;
@@ -444,33 +516,27 @@ void load_area(
     
     
     //Triangulate everything and save bounding boxes.
-    for(size_t s = 0; s < cur_area_data.sectors.size(); ++s) {
-        sector* s_ptr = cur_area_data.sectors[s];
+    set<edge*> lone_edges;
+    for(size_t s = 0; s < game.cur_area_data.sectors.size(); ++s) {
+        sector* s_ptr = game.cur_area_data.sectors[s];
         s_ptr->triangles.clear();
-        //TODO report lone edges and such to the editor.
-        triangulate(s_ptr, NULL, false, false);
+        TRIANGULATION_ERRORS res =
+            triangulate(s_ptr, &lone_edges, load_for_editor, false);
+            
+        if(res != TRIANGULATION_NO_ERROR && load_for_editor) {
+            game.cur_area_data.problems.non_simples[s_ptr] = res;
+            game.cur_area_data.problems.lone_edges.insert(
+                lone_edges.begin(), lone_edges.end()
+            );
+        }
         
-        get_sector_bounding_box(s_ptr, &s_ptr->bbox[0], &s_ptr->bbox[1]);
+        s_ptr->calculate_bounding_box();
     }
     
-    if(!load_for_editor) cur_area_data.generate_blockmap();
-}
-
-
-/* ----------------------------------------------------------------------------
- * Loads the area's sector textures.
- */
-void load_area_textures() {
-    //TODO will this still be needed after area editor v2?
-    for(size_t s = 0; s < cur_area_data.sectors.size(); ++s) {
-        sector* s_ptr = cur_area_data.sectors[s];
-        
-        if(s_ptr->texture_info.file_name.empty()) {
-            s_ptr->texture_info.bitmap = NULL;
-        } else {
-            s_ptr->texture_info.bitmap =
-                textures.get(s_ptr->texture_info.file_name, NULL);
-        }
+    if(!load_for_editor) game.cur_area_data.generate_blockmap();
+    
+    if(game.perf_mon) {
+        game.perf_mon->finish_measurement();
     }
 }
 
@@ -481,54 +547,26 @@ void load_area_textures() {
 void load_asset_file_names() {
     data_node file(SYSTEM_ASSET_FILE_NAMES_FILE_PATH);
     
-    reader_setter rs(&file);
-    
-    rs.set("area_name_font", asset_file_names.area_name_font);
-    rs.set("checkbox_check", asset_file_names.checkbox_check);
-    rs.set("cursor", asset_file_names.cursor);
-    rs.set("cursor_invalid", asset_file_names.cursor_invalid);
-    rs.set("counter_font", asset_file_names.counter_font);
-    rs.set("editor_icons", asset_file_names.editor_icons);
-    rs.set("enemy_spirit", asset_file_names.enemy_spirit);
-    rs.set("group_move_arrow", asset_file_names.group_move_arrow);
-    rs.set("icon", asset_file_names.icon);
-    rs.set("idle_glow", asset_file_names.idle_glow);
-    rs.set("main_font", asset_file_names.main_font);
-    rs.set("main_menu", asset_file_names.main_menu);
-    rs.set("mouse_cursor", asset_file_names.mouse_cursor);
-    rs.set("mouse_wheel_down_icon", asset_file_names.mouse_wd_icon);
-    rs.set("mouse_wheel_up_icon", asset_file_names.mouse_wu_icon);
-    rs.set("notification", asset_file_names.notification);
-    rs.set("pikmin_silhouette", asset_file_names.pikmin_silhouette);
-    rs.set("pikmin_spirit", asset_file_names.pikmin_spirit);
-    rs.set("shadow", asset_file_names.shadow);
-    rs.set("smack", asset_file_names.smack);
-    rs.set("smoke", asset_file_names.smoke);
-    rs.set("sparkle", asset_file_names.sparkle);
-    rs.set("spotlight", asset_file_names.spotlight);
-    rs.set("value_font", asset_file_names.value_font);
-    rs.set("wave_ring", asset_file_names.wave_ring);
-    
-    for(unsigned char i = 0; i < 3; ++i) {
-        rs.set(
-            "mouse_button_" + i2s(i + 1) + "_icon",
-            asset_file_names.mouse_button_icon[i]
-        );
-    }
-    
+    game.asset_file_names.load(&file);
 }
 
 
 /* ----------------------------------------------------------------------------
  * Loads a bitmap from the game's content.
- * file_name:          File name of the bitmap.
- * node:               If present, it will be used to report errors, if any.
- * report_error:       If false, omits error reporting.
- * error_bmp_on_error: If true, returns the error bitmap in the case of an
+ * file_name:
+ *   File name of the bitmap.
+ * node:
+ *   If present, it will be used to report errors, if any.
+ * report_error:
+ *   If false, omits error reporting.
+ * error_bmp_on_error:
+ *   If true, returns the error bitmap in the case of an
  *   error. Otherwise, returns NULL.
- * error_bmp_on_empty: If true, returns the error bitmap in the case of an
+ * error_bmp_on_empty:
+ *   If true, returns the error bitmap in the case of an
  *   empty file name. Otherwise, returns NULL.
- * path_from_root:     Normally, files are fetched from the images folder.
+ * path_from_root:
+ *   Normally, files are fetched from the images folder.
  *   If this parameter is true, the path starts from the game's root.
  */
 ALLEGRO_BITMAP* load_bmp(
@@ -538,7 +576,7 @@ ALLEGRO_BITMAP* load_bmp(
 ) {
     if(file_name.empty()) {
         if(error_bmp_on_empty) {
-            return bmp_error;
+            return game.bmp_error;
         } else {
             return NULL;
         }
@@ -553,7 +591,7 @@ ALLEGRO_BITMAP* load_bmp(
             log_error("Could not open image " + file_name + "!", node);
         }
         if(error_bmp_on_error) {
-            b = bmp_error;
+            b = game.bmp_error;
         }
     }
     
@@ -562,123 +600,43 @@ ALLEGRO_BITMAP* load_bmp(
 
 
 /* ----------------------------------------------------------------------------
- * Loads a game control.
- */
-void load_control(
-    const unsigned char action, const unsigned char player,
-    const string &name, data_node &file, const string &def
-) {
-    string s =
-        file.get_child_by_name(
-            "p" + i2s((player + 1)) + "_" + name
-        )->get_value_or_default((player == 0) ? def : "");
-    vector<string> possible_controls = semicolon_list_to_vector(s);
-    size_t n_possible_controls = possible_controls.size();
-    
-    for(size_t c = 0; c < n_possible_controls; ++c) {
-        controls[player].push_back(control_info(action, possible_controls[c]));
-    }
-}
-
-
-/* ----------------------------------------------------------------------------
- * Loads the creator tools from the tool config file.
- */
-void load_creator_tools() {
-    data_node file(CREATOR_TOOLS_FILE_PATH);
-    
-    if(!file.file_was_opened) return;
-    
-    creator_tools_enabled = s2b(file.get_child_by_name("enabled")->value);
-    
-    for(unsigned char k = 0; k < 20; k++) {
-        string tool_name;
-        if(k < 10) {
-            //The first ten indexes are the F2 - F11 keys.
-            tool_name = file.get_child_by_name("f" + i2s(k + 2))->value;
-        } else {
-            //The second ten indexes are the 0 - 9 keys.
-            tool_name = file.get_child_by_name(i2s(k - 10))->value;
-        }
-        
-        if(tool_name == "area_image") {
-            creator_tool_keys[k] = CREATOR_TOOL_AREA_IMAGE;
-        } else if(tool_name == "change_speed") {
-            creator_tool_keys[k] = CREATOR_TOOL_CHANGE_SPEED;
-        } else if(tool_name == "geometry_info") {
-            creator_tool_keys[k] = CREATOR_TOOL_GEOMETRY_INFO;
-        } else if(tool_name == "hitboxes") {
-            creator_tool_keys[k] = CREATOR_TOOL_HITBOXES;
-        } else if(tool_name == "hurt_mob") {
-            creator_tool_keys[k] = CREATOR_TOOL_HURT_MOB;
-        } else if(tool_name == "mob_info") {
-            creator_tool_keys[k] = CREATOR_TOOL_MOB_INFO;
-        } else if(tool_name == "new_pikmin") {
-            creator_tool_keys[k] = CREATOR_TOOL_NEW_PIKMIN;
-        } else if(tool_name == "teleport") {
-            creator_tool_keys[k] = CREATOR_TOOL_TELEPORT;
-        } else {
-            creator_tool_keys[k] = CREATOR_TOOL_NONE;
-        }
-    }
-    
-    creator_tool_area_image_mobs =
-        s2b(file.get_child_by_name("area_image_mobs")->value);
-    creator_tool_area_image_shadows =
-        s2b(file.get_child_by_name("area_image_shadows")->value);
-    creator_tool_area_image_size =
-        s2i(file.get_child_by_name("area_image_size")->value);
-    creator_tool_change_speed_mult =
-        s2f(file.get_child_by_name("change_speed_multiplier")->value);
-    creator_tool_mob_hurting_ratio =
-        s2f(file.get_child_by_name("mob_hurting_percentage")->value) / 100;
-        
-    creator_tool_auto_start_option =
-        file.get_child_by_name("auto_start_option")->value;
-    creator_tool_auto_start_mode =
-        file.get_child_by_name("auto_start_mode")->value;
-        
-}
-
-
-/* ----------------------------------------------------------------------------
  * Loads the user-made particle generators.
+ * load_resources:
+ *   If true, things like bitmaps and the like will be loaded as well.
+ *   If you don't need those, set this to false to make it load faster.
  */
 void load_custom_particle_generators(const bool load_resources) {
-    custom_particle_generators.clear();
+    if(game.perf_mon) {
+        game.perf_mon->start_measurement("Custom particle generators");
+    }
     
-    data_node file(PARTICLE_GENERATORS_FILE_PATH);
-    
-    size_t n_pg = file.get_nr_of_children();
-    for(size_t pg = 0; pg < n_pg; ++pg) {
-    
-        data_node* pg_node = file.get_child(pg);
-        data_node* p_node = pg_node->get_child_by_name("base");
+    vector<string> generator_files =
+        folder_to_vector(PARTICLE_GENERATORS_FOLDER_PATH, false);
         
-        reader_setter grs(pg_node);
+    for(size_t g = 0; g < generator_files.size(); ++g) {
+        data_node file =
+            load_data_file(
+                PARTICLE_GENERATORS_FOLDER_PATH + "/" + generator_files[g]
+            );
+        if(!file.file_was_opened) continue;
+        
+        data_node* p_node = file.get_child_by_name("base");
+        reader_setter grs(&file);
         reader_setter prs(p_node);
         
-        float emission_interval;
-        size_t number;
-        string bitmap_name;
+        string name_str;
+        float emission_interval_float = 0.0f;
+        size_t number_int = 1;
+        string bitmap_str;
+        data_node* bitmap_node = NULL;
+        
         particle base_p;
-        base_p.priority = PARTICLE_PRIORITY_MEDIUM;
         
-        grs.set("emission_interval", emission_interval);
-        grs.set("number", number);
+        grs.set("name", name_str);
+        grs.set("emission_interval", emission_interval_float);
+        grs.set("number", number_int);
         
-        prs.set("bitmap", bitmap_name);
-        if(bitmap_name.empty()) {
-            base_p.type = PARTICLE_TYPE_CIRCLE;
-        } else {
-            if(load_resources) {
-                base_p.bitmap =
-                    bitmaps.get(
-                        bitmap_name, p_node->get_child_by_name("bitmap")
-                    );
-            }
-            base_p.type = PARTICLE_TYPE_BITMAP;
-        }
+        prs.set("bitmap",          bitmap_str, &bitmap_node);
         prs.set("duration",        base_p.duration);
         prs.set("friction",        base_p.friction);
         prs.set("gravity",         base_p.gravity);
@@ -686,34 +644,56 @@ void load_custom_particle_generators(const bool load_resources) {
         prs.set("size",            base_p.size);
         prs.set("speed",           base_p.speed);
         prs.set("color",           base_p.color);
+        
+        if(bitmap_node) {
+            if(load_resources) {
+                base_p.bitmap =
+                    game.bitmaps.get(
+                        bitmap_str, bitmap_node
+                    );
+            }
+            base_p.type = PARTICLE_TYPE_BITMAP;
+        } else {
+            base_p.type = PARTICLE_TYPE_CIRCLE;
+        }
+        
         base_p.time = base_p.duration;
+        base_p.priority = PARTICLE_PRIORITY_MEDIUM;
         
-        particle_generator pg_struct(emission_interval, base_p, number);
+        particle_generator new_pg(emission_interval_float, base_p, number_int);
         
-        grs.set("number_deviation",      pg_struct.number_deviation);
-        grs.set("duration_deviation",    pg_struct.duration_deviation);
-        grs.set("friction_deviation",    pg_struct.friction_deviation);
-        grs.set("gravity_deviation",     pg_struct.gravity_deviation);
-        grs.set("size_deviation",        pg_struct.size_deviation);
-        grs.set("pos_deviation",         pg_struct.pos_deviation);
-        grs.set("speed_deviation",       pg_struct.speed_deviation);
-        grs.set("angle",                 pg_struct.angle);
-        grs.set("angle_deviation",       pg_struct.angle_deviation);
-        grs.set("total_speed",           pg_struct.total_speed);
-        grs.set("total_speed_deviation", pg_struct.total_speed_deviation);
+        grs.set("number_deviation",      new_pg.number_deviation);
+        grs.set("duration_deviation",    new_pg.duration_deviation);
+        grs.set("friction_deviation",    new_pg.friction_deviation);
+        grs.set("gravity_deviation",     new_pg.gravity_deviation);
+        grs.set("size_deviation",        new_pg.size_deviation);
+        grs.set("pos_deviation",         new_pg.pos_deviation);
+        grs.set("speed_deviation",       new_pg.speed_deviation);
+        grs.set("angle",                 new_pg.angle);
+        grs.set("angle_deviation",       new_pg.angle_deviation);
+        grs.set("total_speed",           new_pg.total_speed);
+        grs.set("total_speed_deviation", new_pg.total_speed_deviation);
         
-        pg_struct.angle = deg_to_rad(pg_struct.angle);
-        pg_struct.angle_deviation = deg_to_rad(pg_struct.angle_deviation);
+        new_pg.angle = deg_to_rad(new_pg.angle);
+        new_pg.angle_deviation = deg_to_rad(new_pg.angle_deviation);
         
-        pg_struct.id = MOB_PARTICLE_GENERATOR_STATUS + pg;
-        
-        custom_particle_generators[pg_node->name] = pg_struct;
+        new_pg.id =
+            MOB_PARTICLE_GENERATOR_STATUS +
+            game.custom_particle_generators.size();
+            
+        game.custom_particle_generators[name_str] = new_pg;
+    }
+    
+    if(game.perf_mon) {
+        game.perf_mon->finish_measurement();
     }
 }
 
 
 /* ----------------------------------------------------------------------------
  * Loads a data file from the game's content.
+ * file_name:
+ *   Name of the file.
  */
 data_node load_data_file(const string &file_name) {
     data_node n = data_node(file_name);
@@ -754,9 +734,9 @@ void load_fonts() {
     //So we load them into bitmaps first.
     
     //Main font.
-    ALLEGRO_BITMAP* temp_font_bmp = load_bmp(asset_file_names.main_font);
+    ALLEGRO_BITMAP* temp_font_bmp = load_bmp(game.asset_file_names.main_font);
     if(temp_font_bmp) {
-        font_main =
+        game.fonts.main =
             al_grab_font_from_bitmap(
                 temp_font_bmp,
                 STANDARD_FONT_RANGES_SIZE / 2, standard_font_ranges
@@ -765,9 +745,9 @@ void load_fonts() {
     al_destroy_bitmap(temp_font_bmp);
     
     //Area name font.
-    temp_font_bmp = load_bmp(asset_file_names.area_name_font);
+    temp_font_bmp = load_bmp(game.asset_file_names.area_name_font);
     if(temp_font_bmp) {
-        font_area_name =
+        game.fonts.area_name =
             al_grab_font_from_bitmap(
                 temp_font_bmp,
                 STANDARD_FONT_RANGES_SIZE / 2, standard_font_ranges
@@ -776,9 +756,9 @@ void load_fonts() {
     al_destroy_bitmap(temp_font_bmp);
     
     //Counter font.
-    temp_font_bmp = load_bmp(asset_file_names.counter_font);
+    temp_font_bmp = load_bmp(game.asset_file_names.counter_font);
     if(temp_font_bmp) {
-        font_counter =
+        game.fonts.counter =
             al_grab_font_from_bitmap(
                 temp_font_bmp,
                 COUNTER_FONT_RANGES_SIZE / 2, counter_font_ranges
@@ -787,9 +767,9 @@ void load_fonts() {
     al_destroy_bitmap(temp_font_bmp);
     
     //Value font.
-    temp_font_bmp = load_bmp(asset_file_names.value_font);
+    temp_font_bmp = load_bmp(game.asset_file_names.value_font);
     if(temp_font_bmp) {
-        font_value =
+        game.fonts.value =
             al_grab_font_from_bitmap(
                 temp_font_bmp,
                 VALUE_FONT_RANGES_SIZE / 2, value_font_ranges
@@ -797,10 +777,7 @@ void load_fonts() {
     }
     al_destroy_bitmap(temp_font_bmp);
     
-    if(font_main) font_main_h = al_get_font_line_height(font_main);
-    if(font_counter) font_counter_h = al_get_font_line_height(font_counter);
-    
-    font_builtin = al_create_builtin_font();
+    game.fonts.builtin = al_create_builtin_font();
 }
 
 
@@ -810,54 +787,9 @@ void load_fonts() {
 void load_game_config() {
     data_node file = load_data_file(CONFIG_FILE);
     
-    reader_setter rs(&file);
-    string pikmin_order_string;
-    string leader_order_string;
+    game.config.load(&file);
     
-    rs.set("game_name", game_name);
-    rs.set("game_version", game_version);
-    
-    rs.set("carrying_color_move", carrying_color_move);
-    rs.set("carrying_color_stop", carrying_color_stop);
-    rs.set("carrying_speed_base_mult", carrying_speed_base_mult);
-    rs.set("carrying_speed_max_mult", carrying_speed_max_mult);
-    rs.set("carrying_speed_weight_mult", carrying_speed_weight_mult);
-    
-    rs.set("day_minutes_start", day_minutes_start);
-    rs.set("day_minutes_end", day_minutes_end);
-    rs.set("day_minutes_per_irl_sec", day_minutes_per_irl_sec);
-    
-    rs.set("pikmin_order", pikmin_order_string);
-    rs.set("standard_pikmin_height", standard_pikmin_height);
-    rs.set("standard_pikmin_radius", standard_pikmin_radius);
-    
-    rs.set("leader_order", leader_order_string);
-    
-    rs.set("idle_task_range", idle_task_range);
-    rs.set("group_move_task_range", group_move_task_range);
-    rs.set("pikmin_chase_range", pikmin_chase_range);
-    rs.set("max_pikmin_in_field", max_pikmin_in_field);
-    rs.set("maturity_power_mult", maturity_power_mult);
-    rs.set("maturity_speed_mult", maturity_speed_mult);
-    
-    rs.set("can_throw_leaders", can_throw_leaders);
-    rs.set("cursor_max_dist", cursor_max_dist);
-    rs.set("cursor_spin_speed", cursor_spin_speed);
-    rs.set("next_pluck_range", next_pluck_range);
-    rs.set("onion_open_range", onion_open_range);
-    rs.set("pikmin_grab_range", pikmin_grab_range);
-    rs.set("pluck_range", pluck_range);
-    rs.set("whistle_growth_speed", whistle_growth_speed);
-    
-    rs.set("message_char_interval", message_char_interval);
-    rs.set("zoom_max_level", zoom_max_level);
-    rs.set("zoom_min_level", zoom_min_level);
-    
-    al_set_window_title(display, game_name.c_str());
-    
-    pikmin_order_strings = semicolon_list_to_vector(pikmin_order_string);
-    leader_order_strings = semicolon_list_to_vector(leader_order_string);
-    cursor_spin_speed = deg_to_rad(cursor_spin_speed);
+    al_set_window_title(game.display, game.config.name.c_str());
 }
 
 
@@ -865,91 +797,170 @@ void load_game_config() {
  * Loads the hazards from the game data.
  */
 void load_hazards() {
-    data_node file = load_data_file(MISC_FOLDER_PATH + "/Hazards.txt");
-    if(!file.file_was_opened) return;
+    if(game.perf_mon) {
+        game.perf_mon->start_measurement("Hazards");
+    }
     
-    size_t n_hazards = file.get_nr_of_children();
-    for(size_t h = 0; h < n_hazards; ++h) {
-        data_node* h_node = file.get_child(h);
-        hazard h_struct;
+    vector<string> hazard_files =
+        folder_to_vector(HAZARDS_FOLDER_PATH, false);
         
-        h_struct.name = h_node->name;
+    for(size_t h = 0; h < hazard_files.size(); ++h) {
+        data_node file =
+            load_data_file(HAZARDS_FOLDER_PATH + "/" + hazard_files[h]);
+        if(!file.file_was_opened) continue;
         
-        data_node* effects_node = h_node->get_child_by_name("effects");
-        vector<string> effects_strs =
-            semicolon_list_to_vector(effects_node->value);
-        for(size_t e = 0; e < effects_strs.size(); ++e) {
-            string effect_name = effects_strs[e];
-            if(status_types.find(effect_name) == status_types.end()) {
-                log_error(
-                    "Unknown status effect \"" + effect_name + "\"!",
-                    effects_node
-                );
-            } else {
-                h_struct.effects.push_back(&(status_types[effect_name]));
+        hazard new_h;
+        reader_setter rs(&file);
+        
+        string effects_str;
+        string liquid_str;
+        data_node* effects_node = NULL;
+        data_node* liquid_node = NULL;
+        
+        rs.set("name", new_h.name);
+        rs.set("color", new_h.main_color);
+        rs.set("effects", effects_str, &effects_node);
+        rs.set("liquid", liquid_str, &liquid_node);
+        
+        if(effects_node) {
+            vector<string> effects_strs = semicolon_list_to_vector(effects_str);
+            for(size_t e = 0; e < effects_strs.size(); ++e) {
+                string effect_name = effects_strs[e];
+                if(
+                    game.status_types.find(effect_name) ==
+                    game.status_types.end()
+                ) {
+                    log_error(
+                        "Unknown status effect \"" + effect_name + "\"!",
+                        effects_node
+                    );
+                } else {
+                    new_h.effects.push_back(
+                        game.status_types[effect_name]
+                    );
+                }
             }
         }
-        data_node* l_node = h_node->get_child_by_name("liquid");
-        if(!l_node->value.empty()) {
-            if(liquids.find(l_node->value) == liquids.end()) {
+        
+        if(liquid_node) {
+            if(game.liquids.find(liquid_str) == game.liquids.end()) {
                 log_error(
-                    "Liquid \"" + l_node->value + "\" not found!",
-                    l_node
+                    "Unknown liquid \"" + liquid_str + "\"!",
+                    liquid_node
                 );
             } else {
-                h_struct.associated_liquid = &(liquids[l_node->value]);
+                new_h.associated_liquid = game.liquids[liquid_str];
             }
         }
         
-        reader_setter(h_node).set("color", h_struct.main_color);
-        
-        hazards[h_node->name] = h_struct;
+        game.hazards[new_h.name] = new_h;
+    }
+    
+    if(game.perf_mon) {
+        game.perf_mon->finish_measurement();
     }
 }
 
 
 /* ----------------------------------------------------------------------------
  * Loads the liquids from the game data.
+ * load_resources:
+ *   If true, things like bitmaps and the like will be loaded as well.
+ *   If you don't need those, set this to false to make it load faster.
  */
 void load_liquids(const bool load_resources) {
-    data_node file = load_data_file(MISC_FOLDER_PATH + "/Liquids.txt");
-    if(!file.file_was_opened) return;
-    
-    map<string, data_node*> nodes;
-    
-    size_t n_liquids = file.get_nr_of_children();
-    for(size_t l = 0; l < n_liquids; ++l) {
-        data_node* l_node = file.get_child(l);
-        liquid l_struct;
-        
-        l_struct.name = l_node->name;
-        reader_setter rs(l_node);
-        rs.set("color", l_struct.main_color);
-        rs.set("surface_1_speed", l_struct.surface_speed[0]);
-        rs.set("surface_2_speed", l_struct.surface_speed[0]);
-        rs.set("surface_alpha", l_struct.surface_alpha);
-        
-        liquids[l_node->name] = l_struct;
-        nodes[l_node->name] = l_node;
+    if(game.perf_mon) {
+        game.perf_mon->start_measurement("Liquid types");
     }
     
-    if(load_resources) {
-        for(auto l = liquids.begin(); l != liquids.end(); ++l) {
+    vector<string> liquid_files =
+        folder_to_vector(LIQUIDS_FOLDER_PATH, false);
+        
+    for(size_t l = 0; l < liquid_files.size(); ++l) {
+        data_node file =
+            load_data_file(LIQUIDS_FOLDER_PATH + "/" + liquid_files[l]);
+        if(!file.file_was_opened) continue;
+        
+        liquid* new_l = new liquid();
+        reader_setter rs(&file);
+        string animation_str;
+        
+        rs.set("name", new_l->name);
+        rs.set("animation", animation_str);
+        rs.set("color", new_l->main_color);
+        rs.set("surface_1_speed", new_l->surface_speed[0]);
+        rs.set("surface_2_speed", new_l->surface_speed[0]);
+        rs.set("surface_alpha", new_l->surface_alpha);
+        
+        if(load_resources) {
             data_node anim_file =
-                load_data_file(
-                    ANIMATIONS_FOLDER_PATH + "/" +
-                    nodes[l->first]->get_child_by_name("animation")->value
-                );
-            l->second.anim_db =
+                load_data_file(ANIMATIONS_FOLDER_PATH + "/" + animation_str);
+                
+            new_l->anim_db =
                 load_animation_database_from_file(&anim_file);
-            if(!l->second.anim_db.animations.empty()) {
-                l->second.anim_instance =
-                    animation_instance(&l->second.anim_db);
-                l->second.anim_instance.cur_anim =
-                    l->second.anim_db.animations[0];
-                l->second.anim_instance.start();
+            if(!new_l->anim_db.animations.empty()) {
+                new_l->anim_instance =
+                    animation_instance(&new_l->anim_db);
+                new_l->anim_instance.cur_anim =
+                    new_l->anim_db.animations[0];
+                new_l->anim_instance.start();
             }
         }
+        
+        game.liquids[new_l->name] = new_l;
+    }
+    
+    if(game.perf_mon) {
+        game.perf_mon->finish_measurement();
+    }
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Loads the maker tools from the tool config file.
+ */
+void load_maker_tools() {
+    data_node file(MAKER_TOOLS_FILE_PATH);
+    
+    if(!file.file_was_opened) return;
+    
+    game.maker_tools.enabled = s2b(file.get_child_by_name("enabled")->value);
+    
+    for(unsigned char k = 0; k < 20; k++) {
+        string tool_name;
+        if(k < 10) {
+            //The first ten indexes are the F2 - F11 keys.
+            tool_name = file.get_child_by_name("f" + i2s(k + 2))->value;
+        } else {
+            //The second ten indexes are the 0 - 9 keys.
+            tool_name = file.get_child_by_name(i2s(k - 10))->value;
+        }
+        
+        for(size_t t = 0; t < N_MAKER_TOOLS; ++t) {
+            if(tool_name == MAKER_TOOL_NAMES[t]) {
+                game.maker_tools.keys[k] = t;
+            }
+        }
+    }
+    
+    reader_setter rs(&file);
+    
+    data_node* mob_hurting_percentage_node = NULL;
+    
+    rs.set("area_image_mobs", game.maker_tools.area_image_mobs);
+    rs.set("area_image_shadows", game.maker_tools.area_image_shadows);
+    rs.set("area_image_size", game.maker_tools.area_image_size);
+    rs.set("change_speed_multiplier", game.maker_tools.change_speed_mult);
+    rs.set(
+        "mob_hurting_percentage", game.maker_tools.mob_hurting_ratio,
+        &mob_hurting_percentage_node
+    );
+    rs.set("auto_start_option", game.maker_tools.auto_start_option);
+    rs.set("auto_start_mode", game.maker_tools.auto_start_mode);
+    rs.set("performance_monitor", game.maker_tools.use_perf_mon);
+    
+    if(mob_hurting_percentage_node) {
+        game.maker_tools.mob_hurting_ratio /= 100.0;
     }
 }
 
@@ -959,32 +970,51 @@ void load_liquids(const bool load_resources) {
  */
 void load_misc_graphics() {
     //Icon.
-    bmp_icon = load_bmp(asset_file_names.icon);
-    al_set_display_icon(display, bmp_icon);
+    game.sys_assets.bmp_icon = game.bitmaps.get(game.asset_file_names.icon);
+    al_set_display_icon(game.display, game.sys_assets.bmp_icon);
     
     //Graphics.
-    bmp_checkbox_check = load_bmp(   asset_file_names.checkbox_check);
-    bmp_cursor = load_bmp(           asset_file_names.cursor);
-    bmp_cursor_invalid = load_bmp(   asset_file_names.cursor_invalid);
-    bmp_enemy_spirit = load_bmp(     asset_file_names.enemy_spirit);
-    bmp_idle_glow = load_bmp(        asset_file_names.idle_glow);
-    bmp_mouse_cursor = load_bmp(     asset_file_names.mouse_cursor);
-    bmp_mouse_wd_icon = load_bmp(    asset_file_names.mouse_wd_icon);
-    bmp_mouse_wu_icon = load_bmp(    asset_file_names.mouse_wu_icon);
-    bmp_notification = load_bmp(     asset_file_names.notification);
-    bmp_group_move_arrow = load_bmp( asset_file_names.group_move_arrow);
-    bmp_pikmin_silhouette = load_bmp(asset_file_names.pikmin_silhouette);
-    bmp_pikmin_spirit = load_bmp(    asset_file_names.pikmin_spirit);
-    bmp_rock = load_bmp(             asset_file_names.rock);
-    bmp_shadow = load_bmp(           asset_file_names.shadow);
-    bmp_smack = load_bmp(            asset_file_names.smack);
-    bmp_smoke = load_bmp(            asset_file_names.smoke);
-    bmp_sparkle = load_bmp(          asset_file_names.sparkle);
-    bmp_spotlight = load_bmp(        asset_file_names.spotlight);
-    bmp_wave_ring = load_bmp(        asset_file_names.wave_ring);
+    game.sys_assets.bmp_checkbox_check =
+        game.bitmaps.get(game.asset_file_names.checkbox_check);
+    game.sys_assets.bmp_cursor =
+        game.bitmaps.get(game.asset_file_names.cursor);
+    game.sys_assets.bmp_cursor_invalid =
+        game.bitmaps.get(game.asset_file_names.cursor_invalid);
+    game.sys_assets.bmp_enemy_spirit =
+        game.bitmaps.get(game.asset_file_names.enemy_spirit);
+    game.sys_assets.bmp_idle_glow =
+        game.bitmaps.get(game.asset_file_names.idle_glow);
+    game.sys_assets.bmp_mouse_cursor =
+        game.bitmaps.get(game.asset_file_names.mouse_cursor);
+    game.sys_assets.bmp_mouse_wd_icon =
+        game.bitmaps.get(game.asset_file_names.mouse_wd_icon);
+    game.sys_assets.bmp_mouse_wu_icon =
+        game.bitmaps.get(game.asset_file_names.mouse_wu_icon);
+    game.sys_assets.bmp_notification =
+        game.bitmaps.get(game.asset_file_names.notification);
+    game.sys_assets.bmp_pikmin_silhouette =
+        game.bitmaps.get(game.asset_file_names.pikmin_silhouette);
+    game.sys_assets.bmp_pikmin_spirit =
+        game.bitmaps.get(game.asset_file_names.pikmin_spirit);
+    game.sys_assets.bmp_rock =
+        game.bitmaps.get(game.asset_file_names.rock);
+    game.sys_assets.bmp_shadow =
+        game.bitmaps.get(game.asset_file_names.shadow);
+    game.sys_assets.bmp_smack =
+        game.bitmaps.get(game.asset_file_names.smack);
+    game.sys_assets.bmp_smoke =
+        game.bitmaps.get(game.asset_file_names.smoke);
+    game.sys_assets.bmp_sparkle =
+        game.bitmaps.get(game.asset_file_names.sparkle);
+    game.sys_assets.bmp_spotlight =
+        game.bitmaps.get(game.asset_file_names.spotlight);
+    game.sys_assets.bmp_swarm_arrow =
+        game.bitmaps.get(game.asset_file_names.swarm_arrow);
+    game.sys_assets.bmp_wave_ring =
+        game.bitmaps.get(game.asset_file_names.wave_ring);
     for(unsigned char i = 0; i < 3; ++i) {
-        bmp_mouse_button_icon[i] =
-            load_bmp(asset_file_names.mouse_button_icon[i]);
+        game.sys_assets.bmp_mouse_button_icon[i] =
+            game.bitmaps.get(game.asset_file_names.mouse_button_icon[i]);
     }
 }
 
@@ -994,36 +1024,46 @@ void load_misc_graphics() {
  */
 void load_misc_sounds() {
     //Sound effects.
-    voice =
+    game.voice =
         al_create_voice(
             44100, ALLEGRO_AUDIO_DEPTH_INT16,   ALLEGRO_CHANNEL_CONF_2
         );
-    mixer =
+    game.mixer =
         al_create_mixer(
             44100, ALLEGRO_AUDIO_DEPTH_FLOAT32, ALLEGRO_CHANNEL_CONF_2
         );
-    al_attach_mixer_to_voice(mixer, voice);
-    sfx_attack = load_sample(              "Attack.ogg",               mixer);
-    sfx_pikmin_attack = load_sample(       "Pikmin_attack.ogg",        mixer);
-    sfx_pikmin_carrying = load_sample(     "Pikmin_carrying.ogg",      mixer);
-    sfx_pikmin_carrying_grab = load_sample("Pikmin_carrying_grab.ogg", mixer);
-    sfx_pikmin_caught = load_sample(       "Pikmin_caught.ogg",        mixer);
-    sfx_pikmin_dying = load_sample(        "Pikmin_dying.ogg",         mixer);
-    sfx_pikmin_held = load_sample(         "Pikmin_held.ogg",          mixer);
-    sfx_pikmin_idle = load_sample(         "Pikmin_idle.ogg",          mixer);
-    sfx_pikmin_thrown = load_sample(       "Pikmin_thrown.ogg",        mixer);
-    sfx_pikmin_plucked = load_sample(      "Pikmin_plucked.ogg",       mixer);
-    sfx_pikmin_called = load_sample(       "Pikmin_called.ogg",        mixer);
-    sfx_olimar_whistle = load_sample(      "Olimar_whistle.ogg",       mixer);
-    sfx_louie_whistle = load_sample(       "Louie_whistle.ogg",        mixer);
-    sfx_president_whistle = load_sample(   "President_whistle.ogg",    mixer);
-    sfx_olimar_name_call = load_sample(    "Olimar_name_call.ogg",     mixer);
-    sfx_louie_name_call = load_sample(     "Louie_name_call.ogg",      mixer);
-    sfx_president_name_call = load_sample( "President_name_call.ogg",  mixer);
-    sfx_pluck = load_sample(               "Pluck.ogg",                mixer);
-    sfx_throw = load_sample(               "Throw.ogg",                mixer);
-    sfx_switch_pikmin = load_sample(       "Switch_Pikmin.ogg",        mixer);
-    sfx_camera = load_sample(              "Camera.ogg",               mixer);
+    al_attach_mixer_to_voice(game.mixer, game.voice);
+    
+    game.sys_assets.sfx_attack =
+        load_sample("Attack.ogg");
+    game.sys_assets.sfx_pikmin_attack =
+        load_sample("Pikmin_attack.ogg");
+    game.sys_assets.sfx_pikmin_carrying =
+        load_sample("Pikmin_carrying.ogg");
+    game.sys_assets.sfx_pikmin_carrying_grab =
+        load_sample("Pikmin_carrying_grab.ogg");
+    game.sys_assets.sfx_pikmin_caught =
+        load_sample("Pikmin_caught.ogg");
+    game.sys_assets.sfx_pikmin_dying =
+        load_sample("Pikmin_dying.ogg");
+    game.sys_assets.sfx_pikmin_held =
+        load_sample("Pikmin_held.ogg");
+    game.sys_assets.sfx_pikmin_idle =
+        load_sample("Pikmin_idle.ogg");
+    game.sys_assets.sfx_pikmin_thrown =
+        load_sample("Pikmin_thrown.ogg");
+    game.sys_assets.sfx_pikmin_plucked =
+        load_sample("Pikmin_plucked.ogg");
+    game.sys_assets.sfx_pikmin_called =
+        load_sample("Pikmin_called.ogg");
+    game.sys_assets.sfx_pluck =
+        load_sample("Pluck.ogg");
+    game.sys_assets.sfx_throw =
+        load_sample("Throw.ogg");
+    game.sys_assets.sfx_switch_pikmin =
+        load_sample("Switch_Pikmin.ogg");
+    game.sys_assets.sfx_camera =
+        load_sample("Camera.ogg");
 }
 
 
@@ -1031,127 +1071,50 @@ void load_misc_sounds() {
  * Loads the player's options.
  */
 void load_options() {
-    for(size_t h = 0; h < ANIMATION_EDITOR_HISTORY_SIZE; ++h) {
-        animation_editor_history.push_back("");
-    }
-    
     data_node file = data_node(OPTIONS_FILE_PATH);
     if(!file.file_was_opened) return;
     
     //Init joysticks.
-    joystick_numbers.clear();
+    game.joystick_numbers.clear();
     int n_joysticks = al_get_num_joysticks();
     for(int j = 0; j < n_joysticks; ++j) {
-        joystick_numbers[al_get_joystick(j)] = j;
+        game.joystick_numbers[al_get_joystick(j)] = j;
     }
     
-    /* Load controls.
-     * Format of a control:
-     * "p<player>_<action>=<possible control 1>,<possible control 2>,<...>"
-     * Format of a possible control:
-     * "<input method>_<parameters, underscore separated>"
-     * Input methods:
-     * "k" (keyboard key), "mb" (mouse button),
-     * "mwu" (mouse wheel up), "mwd" (down),
-     * "mwl" (left), "mwr" (right), "jb" (joystick button),
-     * "jap" (joystick axis, positive), "jan" (joystick axis, negative).
-     * The parameters are the key/button number, joystick number,
-     * joystick stick and axis, etc.
-     * Check the constructor of control_info for more information.
-     */
-    for(unsigned char p = 0; p < MAX_PLAYERS; ++p) {
-        controls[p].clear();
-        for(size_t b = 0; b < N_BUTTONS; ++b) {
-            string option_name = buttons.list[b].option_name;
-            if(option_name.empty()) continue;
-            load_control(buttons.list[b].id, p, option_name, file);
-        }
-    }
+    //Read the main options.
+    game.options.load(&file);
     
-    //Weed out controls that didn't parse correctly.
-    for(size_t p = 0; p < MAX_PLAYERS; p++) {
-        size_t n_controls = controls[p].size();
-        for(size_t c = 0; c < n_controls; ) {
-            if(controls[p][c].action == BUTTON_NONE) {
-                controls[p].erase(controls[p].begin() + c);
-            } else {
-                c++;
-            }
-        }
-    }
+    game.win_fullscreen = game.options.intended_win_fullscreen;
+    game.win_w = game.options.intended_win_w;
+    game.win_h = game.options.intended_win_h;
     
-    for(unsigned char p = 0; p < MAX_PLAYERS; ++p) {
-        mouse_moves_cursor[p] =
-            s2b(
-                file.get_child_by_name(
-                    "p" + i2s((p + 1)) + "_mouse_moves_cursor"
-                )->get_value_or_default((p == 0) ? "true" : "false")
-            );
-    }
-    
-    //Other options.
+    //Set up the animation editor history.
     reader_setter rs(&file);
-    string resolution_str;
-    rs.set("area_editor_backup_interval", area_editor_backup_interval);
-    rs.set("area_editor_grid_interval", area_editor_grid_interval);
-    rs.set("area_editor_show_edge_length", area_editor_show_edge_length);
-    rs.set("area_editor_undo_limit", area_editor_undo_limit);
-    rs.set("area_editor_view_mode", area_editor_view_mode);
-    rs.set("draw_cursor_trail", draw_cursor_trail);
-    rs.set("editor_mmb_pan", editor_mmb_pan);
-    rs.set("editor_mouse_drag_threshold", editor_mouse_drag_threshold);
-    rs.set("fps", game_fps);
-    rs.set("fullscreen", scr_fullscreen);
-    rs.set("joystick_min_deadzone", joystick_min_deadzone);
-    rs.set("joystick_max_deadzone", joystick_max_deadzone);
-    rs.set("max_particles", max_particles);
-    rs.set("middle_zoom_level", zoom_mid_level);
-    rs.set("mipmaps", mipmaps_enabled);
-    rs.set("pretty_whistle", pretty_whistle);
-    rs.set("resolution", resolution_str);
-    rs.set("smooth_scaling", smooth_scaling);
-    rs.set("window_position_hack", window_position_hack);
     
-    game_fps = max(1, game_fps);
-    joystick_min_deadzone = clamp(joystick_min_deadzone, 0.0f, 1.0f);
-    joystick_max_deadzone = clamp(joystick_max_deadzone, 0.0f, 1.0f);
-    if(joystick_min_deadzone > joystick_max_deadzone) {
-        swap(joystick_min_deadzone, joystick_max_deadzone);
-    }
-    
-    vector<string> resolution_parts = split(resolution_str);
-    if(resolution_parts.size() >= 2) {
-        scr_w = max(1, s2i(resolution_parts[0]));
-        scr_h = max(1, s2i(resolution_parts[1]));
-    }
-    
-    for(size_t h = 0; h < ANIMATION_EDITOR_HISTORY_SIZE; ++h) {
+    game.states.animation_editor_st->history.clear();
+    for(size_t h = 0; h < animation_editor::HISTORY_SIZE; ++h) {
+        game.states.animation_editor_st->history.push_back("");
         rs.set(
             "animation_editor_history_" + i2s(h + 1),
-            animation_editor_history[h]
+            game.states.animation_editor_st->history[h]
         );
     }
-    
-    intended_scr_fullscreen = scr_fullscreen;
-    intended_scr_w = scr_w;
-    intended_scr_h = scr_h;
-    
 }
 
 
 /* ----------------------------------------------------------------------------
  * Loads an audio sample from the game's content.
+ * file_name:
+ *   Name of the file to load.
  */
-sample_struct load_sample(
-    const string &file_name, ALLEGRO_MIXER* const mixer
-) {
+sample_struct load_sample(const string &file_name) {
     ALLEGRO_SAMPLE* sample =
         al_load_sample((AUDIO_FOLDER_PATH + "/" + file_name).c_str());
     if(!sample) {
         log_error("Could not open audio sample " + file_name + "!");
     }
     
-    return sample_struct(sample, mixer);
+    return sample_struct(sample, game.mixer);
 }
 
 
@@ -1159,197 +1122,292 @@ sample_struct load_sample(
  * Loads the spike damage types available.
  */
 void load_spike_damage_types() {
-    data_node types_file = load_data_file(SPIKE_DAMAGE_TYPES_FILE_PATH);
-    size_t n_types =
-        types_file.get_nr_of_children();
+    if(game.perf_mon) {
+        game.perf_mon->start_measurement("Spike damage types");
+    }
+    
+    vector<string> type_files =
+        folder_to_vector(SPIKE_DAMAGES_FOLDER_PATH, false);
         
-    for(size_t t = 0; t < n_types; ++t) {
-        data_node* type_node = types_file.get_child(t);
-        spike_damage_type s_type;
+    for(size_t t = 0; t < type_files.size(); ++t) {
+        data_node file =
+            load_data_file(SPIKE_DAMAGES_FOLDER_PATH + "/" + type_files[t]);
+        if(!file.file_was_opened) continue;
         
-        s_type.name = type_node->name;
-        s_type.damage =
-            s2f(type_node->get_child_by_name("damage")->value);
-        s_type.ingestion_only =
-            s2b(type_node->get_child_by_name("ingestion_only")->value);
-        s_type.is_damage_ratio =
-            s2b(type_node->get_child_by_name("is_damage_ratio")->value);
-            
-        data_node* pg_node = type_node->get_child_by_name("particle_generator");
-        string pg_name = pg_node->value;
-        if(!pg_name.empty()) {
+        spike_damage_type new_t;
+        reader_setter rs(&file);
+        
+        string particle_generator_name;
+        data_node* damage_node = NULL;
+        data_node* particle_generator_node = NULL;
+        
+        rs.set("name", new_t.name);
+        rs.set("damage", new_t.damage, &damage_node);
+        rs.set("ingestion_only", new_t.ingestion_only);
+        rs.set("is_damage_ratio", new_t.is_damage_ratio);
+        rs.set(
+            "particle_generator", particle_generator_name,
+            &particle_generator_node
+        );
+        
+        if(particle_generator_node) {
             if(
-                custom_particle_generators.find(pg_name) ==
-                custom_particle_generators.end()
+                game.custom_particle_generators.find(particle_generator_name) ==
+                game.custom_particle_generators.end()
             ) {
                 log_error(
                     "Unknown particle generator \"" +
-                    pg_name + "\"!", pg_node
+                    particle_generator_name + "\"!", particle_generator_node
                 );
             } else {
-                s_type.particle_gen = &custom_particle_generators[pg_name];
-                s_type.particle_offset_pos =
+                new_t.particle_gen =
+                    &game.custom_particle_generators[particle_generator_name];
+                new_t.particle_offset_pos =
                     s2p(
-                        type_node->get_child_by_name("particle_offset")->value,
-                        &s_type.particle_offset_z
+                        file.get_child_by_name("particle_offset")->value,
+                        &new_t.particle_offset_z
                     );
             }
         }
         
-        if(s_type.damage == 0) {
+        if(new_t.damage == 0) {
             log_error(
-                "Spike damage type \"" + s_type.name +
+                "Spike damage type \"" + new_t.name +
                 "\" needs a damage number!",
-                type_node
+                (damage_node ? damage_node : &file)
             );
         }
         
-        spike_damage_types[s_type.name] = s_type;
+        game.spike_damage_types[new_t.name] = new_t;
+    }
+    
+    if(game.perf_mon) {
+        game.perf_mon->finish_measurement();
     }
 }
 
 
 /* ----------------------------------------------------------------------------
  * Loads spray types from the game data.
+ * load_resources:
+ *   If true, things like bitmaps and the like will be loaded as well.
+ *   If you don't need those, set this to false to make it load faster.
  */
 void load_spray_types(const bool load_resources) {
-    data_node file = data_node(MISC_FOLDER_PATH + "/Sprays.txt");
-    if(!file.file_was_opened) return;
+    if(game.perf_mon) {
+        game.perf_mon->start_measurement("Spray types");
+    }
     
-    size_t n_sprays = file.get_nr_of_children();
-    for(size_t s = 0; s < n_sprays; ++s) {
-        data_node* s_node = file.get_child(s);
-        spray_type st;
+    vector<string> type_files =
+        folder_to_vector(SPRAYS_FOLDER_PATH, false);
         
-        st.name = s_node->name;
+    vector<spray_type> temp_types;
+    
+    for(size_t t = 0; t < type_files.size(); ++t) {
+        data_node file =
+            load_data_file(SPRAYS_FOLDER_PATH + "/" + type_files[t]);
+        if(!file.file_was_opened) continue;
         
-        data_node* effects_node = s_node->get_child_by_name("effects");
-        vector<string> effects_strs =
-            semicolon_list_to_vector(effects_node->value);
-        for(size_t e = 0; e < effects_strs.size(); ++e) {
-            string effect_name = effects_strs[e];
-            if(status_types.find(effect_name) == status_types.end()) {
-                log_error(
-                    "Unknown status effect \"" + effect_name + "\"!",
-                    effects_node
-                );
-            } else {
-                st.effects.push_back(&(status_types[effect_name]));
+        spray_type new_t;
+        reader_setter rs(&file);
+        
+        string effects_str;
+        string icon_str;
+        data_node* effects_node = NULL;
+        data_node* icon_node = NULL;
+        
+        rs.set("name", new_t.name);
+        rs.set("effects", effects_str, &effects_node);
+        rs.set("icon", icon_str, &icon_node);
+        rs.set("group", new_t.group);
+        rs.set("angle", new_t.angle);
+        rs.set("distance_range", new_t.distance_range);
+        rs.set("angle_range", new_t.angle_range);
+        rs.set("color", new_t.main_color);
+        rs.set("ingredients_needed", new_t.ingredients_needed);
+        rs.set("buries_pikmin", new_t.buries_pikmin);
+        
+        if(effects_node) {
+            vector<string> effects_strs =
+                semicolon_list_to_vector(effects_node->value);
+            for(size_t e = 0; e < effects_strs.size(); ++e) {
+                string effect_name = effects_strs[e];
+                if(
+                    game.status_types.find(effect_name) ==
+                    game.status_types.end()
+                ) {
+                    log_error(
+                        "Unknown status effect \"" + effect_name + "\"!",
+                        effects_node
+                    );
+                } else {
+                    new_t.effects.push_back(game.status_types[effect_name]);
+                }
             }
         }
         
-        reader_setter rs(s_node);
-        rs.set("group", st.group);
-        rs.set("angle", st.angle);
-        rs.set("distance_range", st.distance_range);
-        rs.set("angle_range", st.angle_range);
-        rs.set("color", st.main_color);
-        rs.set("ingredients_needed", st.ingredients_needed);
-        rs.set("buries_pikmin", st.buries_pikmin);
-        
-        st.angle = deg_to_rad(st.angle);
-        st.angle_range = deg_to_rad(st.angle_range);
+        new_t.angle = deg_to_rad(new_t.angle);
+        new_t.angle_range = deg_to_rad(new_t.angle_range);
         
         if(load_resources) {
-            data_node* icon_node = s_node->get_child_by_name("icon");
-            st.bmp_spray = bitmaps.get(icon_node->value, icon_node);
+            new_t.bmp_spray = game.bitmaps.get(icon_str, icon_node);
         }
         
-        spray_types.push_back(st);
+        temp_types.push_back(new_t);
+    }
+    
+    //Check the registered order and sort.
+    for(size_t t = 0; t < temp_types.size(); ++t) {
+        if(
+            find(
+                game.config.spray_order_strings.begin(),
+                game.config.spray_order_strings.end(),
+                temp_types[t].name
+            ) == game.config.spray_order_strings.end()
+        ) {
+            log_error(
+                "Spray type \"" + temp_types[t].name + "\" was not found "
+                "in the spray order list in the config file!"
+            );
+            game.config.spray_order_strings.push_back(temp_types[t].name);
+        }
+    }
+    for(size_t o = 0; o < game.config.spray_order_strings.size(); ++o) {
+        string s = game.config.spray_order_strings[o];
+        bool found = false;
+        for(size_t t = 0; t < temp_types.size(); ++t) {
+            if(temp_types[t].name == s) {
+                game.spray_types.push_back(temp_types[t]);
+                found = true;
+            }
+        }
+        
+        if(!found) {
+            log_error(
+                "Unknown spray type \"" + s + "\" found "
+                "in the spray order list in the config file!"
+            );
+        }
+    }
+    
+    if(game.perf_mon) {
+        game.perf_mon->finish_measurement();
     }
 }
 
 
 /* ----------------------------------------------------------------------------
  * Loads status effect types from the game data.
+ * load_resources:
+ *   If true, things like bitmaps and the like will be loaded as well.
+ *   If you don't need those, set this to false to make it load faster.
  */
 void load_status_types(const bool load_resources) {
-    data_node file = data_node(MISC_FOLDER_PATH + "/Statuses.txt");
-    if(!file.file_was_opened) return;
+    if(game.perf_mon) {
+        game.perf_mon->start_measurement("Status types");
+    }
     
-    size_t n_statuses = file.get_nr_of_children();
-    for(size_t s = 0; s < n_statuses; ++s) {
-        data_node* s_node = file.get_child(s);
-        status_type st;
+    vector<string> type_files =
+        folder_to_vector(STATUSES_FOLDER_PATH, false);
         
-        st.name = s_node->name;
+    for(size_t t = 0; t < type_files.size(); ++t) {
+        data_node file =
+            load_data_file(STATUSES_FOLDER_PATH + "/" + type_files[t]);
+        if(!file.file_was_opened) continue;
         
+        status_type* new_t = new status_type();
+        reader_setter rs(&file);
+        
+        bool affects_pikmin_bool = false;
+        bool affects_leaders_bool = false;
+        bool affects_enemies_bool = false;
+        bool affects_others_bool = false;
         string particle_offset_str;
+        string particle_gen_str;
+        data_node* particle_gen_node = NULL;
         
-        reader_setter rs(s_node);
-        rs.set("color",                   st.color);
-        rs.set("tint",                    st.tint);
-        rs.set("glow",                    st.glow);
-        rs.set("removable_with_whistle",  st.removable_with_whistle);
-        rs.set("auto_remove_time",        st.auto_remove_time);
-        rs.set("health_change_ratio",     st.health_change_ratio);
-        rs.set("causes_disable",          st.causes_disable);
-        rs.set("causes_flailing",         st.causes_flailing);
-        rs.set("causes_panic",            st.causes_panic);
-        rs.set("disabled_state_inedible", st.disabled_state_inedible);
-        rs.set("speed_multiplier",        st.speed_multiplier);
-        rs.set("attack_multiplier",       st.attack_multiplier);
-        rs.set("defense_multiplier",      st.defense_multiplier);
-        rs.set("maturity_change_amount",  st.maturity_change_amount);
-        rs.set("disables_attack",         st.disables_attack);
-        rs.set("turns_invisible",         st.turns_invisible);
-        rs.set("anim_speed_multiplier",   st.anim_speed_multiplier);
-        rs.set("animation",               st.animation_name);
-        rs.set("animation_mob_scale",     st.animation_mob_scale);
+        rs.set("name",                    new_t->name);
+        rs.set("color",                   new_t->color);
+        rs.set("tint",                    new_t->tint);
+        rs.set("glow",                    new_t->glow);
+        rs.set("affects_pikmin",          affects_pikmin_bool);
+        rs.set("affects_leaders",         affects_leaders_bool);
+        rs.set("affects_enemies",         affects_enemies_bool);
+        rs.set("affects_others",          affects_others_bool);
+        rs.set("removable_with_whistle",  new_t->removable_with_whistle);
+        rs.set("auto_remove_time",        new_t->auto_remove_time);
+        rs.set("health_change_ratio",     new_t->health_change_ratio);
+        rs.set("causes_disable",          new_t->causes_disable);
+        rs.set("causes_flailing",         new_t->causes_flailing);
+        rs.set("causes_panic",            new_t->causes_panic);
+        rs.set("disabled_state_inedible", new_t->disabled_state_inedible);
+        rs.set("speed_multiplier",        new_t->speed_multiplier);
+        rs.set("attack_multiplier",       new_t->attack_multiplier);
+        rs.set("defense_multiplier",      new_t->defense_multiplier);
+        rs.set("maturity_change_amount",  new_t->maturity_change_amount);
+        rs.set("disables_attack",         new_t->disables_attack);
+        rs.set("turns_invisible",         new_t->turns_invisible);
+        rs.set("anim_speed_multiplier",   new_t->anim_speed_multiplier);
+        rs.set("animation",               new_t->animation_name);
+        rs.set("animation_mob_scale",     new_t->animation_mob_scale);
+        rs.set("particle_generator",      particle_gen_str, &particle_gen_node);
         rs.set("particle_offset",         particle_offset_str);
         
-        st.affects = 0;
-        if(s2b(s_node->get_child_by_name("affects_pikmin")->value)) {
-            st.affects |= STATUS_AFFECTS_PIKMIN;
+        new_t->affects = 0;
+        if(affects_pikmin_bool) {
+            new_t->affects |= STATUS_AFFECTS_PIKMIN;
         }
-        if(s2b(s_node->get_child_by_name("affects_leaders")->value)) {
-            st.affects |= STATUS_AFFECTS_LEADERS;
+        if(affects_leaders_bool) {
+            new_t->affects |= STATUS_AFFECTS_LEADERS;
         }
-        if(s2b(s_node->get_child_by_name("affects_enemies")->value)) {
-            st.affects |= STATUS_AFFECTS_ENEMIES;
+        if(affects_enemies_bool) {
+            new_t->affects |= STATUS_AFFECTS_ENEMIES;
         }
-        if(s2b(s_node->get_child_by_name("affects_others")->value)) {
-            st.affects |= STATUS_AFFECTS_OTHERS;
+        if(affects_others_bool) {
+            new_t->affects |= STATUS_AFFECTS_OTHERS;
         }
         
-        data_node* pg_node = s_node->get_child_by_name("particle_generator");
-        string pg_name = pg_node->value;
-        if(!pg_name.empty()) {
+        if(particle_gen_node) {
             if(
-                custom_particle_generators.find(pg_name) ==
-                custom_particle_generators.end()
+                game.custom_particle_generators.find(particle_gen_str) ==
+                game.custom_particle_generators.end()
             ) {
                 log_error(
                     "Unknown particle generator \"" +
-                    pg_name + "\"!", pg_node
+                    particle_gen_str + "\"!", particle_gen_node
                 );
             } else {
-                st.generates_particles = true;
-                st.particle_gen = &custom_particle_generators[pg_name];
-                st.particle_offset_pos =
-                    s2p(particle_offset_str, &st.particle_offset_z);
+                new_t->generates_particles =
+                    true;
+                new_t->particle_gen =
+                    &game.custom_particle_generators[particle_gen_str];
+                new_t->particle_offset_pos =
+                    s2p(particle_offset_str, &new_t->particle_offset_z);
             }
         }
         
-        status_types[st.name] = st;
-    }
-    
-    if(load_resources) {
-        for(auto s = status_types.begin(); s != status_types.end(); ++s) {
-            if(s->second.animation_name.empty()) continue;
-            data_node anim_file =
-                load_data_file(
-                    ANIMATIONS_FOLDER_PATH + "/" + s->second.animation_name
-                );
-            s->second.anim_db = load_animation_database_from_file(&anim_file);
-            if(!s->second.anim_db.animations.empty()) {
-                s->second.anim_instance =
-                    animation_instance(&s->second.anim_db);
-                s->second.anim_instance.cur_anim =
-                    s->second.anim_db.animations[0];
-                s->second.anim_instance.start();
+        if(load_resources) {
+            if(!new_t->animation_name.empty()) {
+                data_node anim_file =
+                    load_data_file(
+                        ANIMATIONS_FOLDER_PATH + "/" + new_t->animation_name
+                    );
+                new_t->anim_db = load_animation_database_from_file(&anim_file);
+                if(!new_t->anim_db.animations.empty()) {
+                    new_t->anim_instance =
+                        animation_instance(&new_t->anim_db);
+                    new_t->anim_instance.cur_anim =
+                        new_t->anim_db.animations[0];
+                    new_t->anim_instance.start();
+                }
             }
         }
+        
+        game.status_types[new_t->name] = new_t;
+    }
+    
+    if(game.perf_mon) {
+        game.perf_mon->finish_measurement();
     }
 }
 
@@ -1362,7 +1420,8 @@ void load_system_animations() {
         load_data_file(SYSTEM_ANIMATIONS_FILE_PATH);
         
     init_single_animation(
-        &system_animations_file, "leader_damage_sparks", spark_animation
+        &system_animations_file,
+        "leader_damage_sparks", game.sys_assets.spark_animation
     );
 }
 
@@ -1371,23 +1430,36 @@ void load_system_animations() {
  * Loads the weather conditions available.
  */
 void load_weather() {
-    data_node weather_file = load_data_file(WEATHER_FILE_PATH);
-    size_t n_weather_conditions =
-        weather_file.get_nr_of_children();
+    if(game.perf_mon) {
+        game.perf_mon->start_measurement("Weather");
+    }
+    
+    vector<string> weather_files =
+        folder_to_vector(WEATHER_FOLDER_PATH, false);
         
-    for(size_t wc = 0; wc < n_weather_conditions; ++wc) {
-        data_node* weather_node = weather_file.get_child(wc);
-        weather weather_struct;
+    for(size_t w = 0; w < weather_files.size(); ++w) {
+        data_node file =
+            load_data_file(WEATHER_FOLDER_PATH + "/" + weather_files[w]);
+        if(!file.file_was_opened) continue;
         
-        weather_struct.name = weather_node->name;
+        weather new_w;
+        reader_setter rs(&file);
+        
+        //General.
+        rs.set("name", new_w.name);
+        rs.set("fog_near", new_w.fog_near);
+        rs.set("fog_far", new_w.fog_far);
+        
+        new_w.fog_near = std::max(new_w.fog_near, 0.0f);
+        new_w.fog_far = std::max(new_w.fog_far, new_w.fog_near);
         
         //Lighting.
-        vector<pair<size_t, string> > lighting_table =
-            get_weather_table(weather_node->get_child_by_name("lighting"));
+        vector<std::pair<size_t, string> > lighting_table =
+            get_weather_table(file.get_child_by_name("lighting"));
             
         for(size_t p = 0; p < lighting_table.size(); ++p) {
-            weather_struct.daylight.push_back(
-                make_pair(
+            new_w.daylight.push_back(
+                std::make_pair(
                     lighting_table[p].first,
                     s2c(lighting_table[p].second)
                 )
@@ -1395,12 +1467,12 @@ void load_weather() {
         }
         
         //Sun's strength.
-        vector<pair<size_t, string> > sun_strength_table =
-            get_weather_table(weather_node->get_child_by_name("sun_strength"));
+        vector<std::pair<size_t, string> > sun_strength_table =
+            get_weather_table(file.get_child_by_name("sun_strength"));
             
         for(size_t p = 0; p < sun_strength_table.size(); ++p) {
-            weather_struct.sun_strength.push_back(
-                make_pair(
+            new_w.sun_strength.push_back(
+                std::make_pair(
                     sun_strength_table[p].first,
                     s2i(sun_strength_table[p].second)
                 )
@@ -1408,14 +1480,14 @@ void load_weather() {
         }
         
         //Blackout effect's strength.
-        vector<pair<size_t, string> > blackout_strength_table =
+        vector<std::pair<size_t, string> > blackout_strength_table =
             get_weather_table(
-                weather_node->get_child_by_name("blackout_strength")
+                file.get_child_by_name("blackout_strength")
             );
             
         for(size_t p = 0; p < blackout_strength_table.size(); ++p) {
-            weather_struct.blackout_strength.push_back(
-                make_pair(
+            new_w.blackout_strength.push_back(
+                std::make_pair(
                     blackout_strength_table[p].first,
                     s2i(blackout_strength_table[p].second)
                 )
@@ -1423,55 +1495,25 @@ void load_weather() {
         }
         
         //Fog.
-        weather_struct.fog_near =
-            s2f(weather_node->get_child_by_name("fog_near")->value);
-        weather_struct.fog_far =
-            s2f(weather_node->get_child_by_name("fog_far")->value);
-        weather_struct.fog_near = max(weather_struct.fog_near, 0.0f);
-        weather_struct.fog_far =
-            max(weather_struct.fog_far, weather_struct.fog_near);
-            
-        vector<pair<size_t, string> > fog_color_table =
+        vector<std::pair<size_t, string> > fog_color_table =
             get_weather_table(
-                weather_node->get_child_by_name("fog_color")
+                file.get_child_by_name("fog_color")
             );
         for(size_t p = 0; p < fog_color_table.size(); ++p) {
-            weather_struct.fog_color.push_back(
-                make_pair(
+            new_w.fog_color.push_back(
+                std::make_pair(
                     fog_color_table[p].first,
                     s2c(fog_color_table[p].second)
                 )
             );
         }
         
-        //Precipitation.
-        weather_struct.precipitation_type =
-            s2i(
-                weather_node->get_child_by_name(
-                    "precipitation_type"
-                )->get_value_or_default(i2s(PRECIPITATION_TYPE_NONE))
-            );
-        weather_struct.precipitation_frequency =
-            interval(
-                weather_node->get_child_by_name(
-                    "precipitation_frequency"
-                )->value
-            );
-        weather_struct.precipitation_speed =
-            interval(
-                weather_node->get_child_by_name(
-                    "precipitation_speed"
-                )->value
-            );
-        weather_struct.precipitation_angle =
-            interval(
-                weather_node->get_child_by_name(
-                    "precipitation_angle"
-                )->get_value_or_default(f2s((TAU * 0.75)))
-            );
-            
         //Save it in the map.
-        weather_conditions[weather_struct.name] = weather_struct;
+        game.weather_conditions[new_w.name] = new_w;
+    }
+    
+    if(game.perf_mon) {
+        game.perf_mon->finish_measurement();
     }
 }
 
@@ -1480,23 +1522,7 @@ void load_weather() {
  * Unloads the loaded area from memory.
  */
 void unload_area() {
-    cur_area_data.clear();
-}
-
-
-/* ----------------------------------------------------------------------------
- * Unloads the loaded area's sector textures from memory.
- */
-void unload_area_textures() {
-    for(size_t s = 0; s < cur_area_data.sectors.size(); ++s) {
-        sector* s_ptr = cur_area_data.sectors[s];
-        
-        if(s_ptr->texture_info.file_name.empty()) continue;
-        
-        textures.detach(s_ptr->texture_info.file_name);
-        s_ptr->texture_info.file_name.clear();
-        s_ptr->texture_info.bitmap = NULL;
-    }
+    game.cur_area_data.clear();
 }
 
 
@@ -1505,13 +1531,13 @@ void unload_area_textures() {
  */
 void unload_custom_particle_generators() {
     for(
-        auto g = custom_particle_generators.begin();
-        g != custom_particle_generators.end();
+        auto g = game.custom_particle_generators.begin();
+        g != game.custom_particle_generators.end();
         ++g
     ) {
-        bitmaps.detach(g->second.base_particle.bitmap);
+        game.bitmaps.detach(g->second.base_particle.bitmap);
     }
-    custom_particle_generators.clear();
+    game.custom_particle_generators.clear();
 }
 
 
@@ -1519,7 +1545,7 @@ void unload_custom_particle_generators() {
  * Unloads hazards loaded in memory.
  */
 void unload_hazards() {
-    hazards.clear();
+    game.hazards.clear();
 }
 
 
@@ -1527,10 +1553,11 @@ void unload_hazards() {
  * Unloads loaded liquids from memory.
  */
 void unload_liquids() {
-    for(auto l = liquids.begin(); l != liquids.end(); ++l) {
-        l->second.anim_db.destroy();
+    for(auto &l : game.liquids) {
+        l.second->anim_db.destroy();
+        delete l.second;
     }
-    liquids.clear();
+    game.liquids.clear();
 }
 
 
@@ -1538,47 +1565,44 @@ void unload_liquids() {
  * Unloads miscellaneous graphics, sounds, and other resources.
  */
 void unload_misc_resources() {
-    al_destroy_bitmap(bmp_checkbox_check);
-    al_destroy_bitmap(bmp_cursor);
-    al_destroy_bitmap(bmp_cursor_invalid);
-    al_destroy_bitmap(bmp_enemy_spirit);
-    al_destroy_bitmap(bmp_icon);
-    al_destroy_bitmap(bmp_idle_glow);
-    al_destroy_bitmap(bmp_mouse_wd_icon);
-    al_destroy_bitmap(bmp_mouse_wu_icon);
-    al_destroy_bitmap(bmp_mouse_cursor);
-    al_destroy_bitmap(bmp_notification);
-    al_destroy_bitmap(bmp_group_move_arrow);
-    al_destroy_bitmap(bmp_pikmin_spirit);
-    al_destroy_bitmap(bmp_rock);
-    al_destroy_bitmap(bmp_shadow);
-    al_destroy_bitmap(bmp_smack);
-    al_destroy_bitmap(bmp_smoke);
-    al_destroy_bitmap(bmp_sparkle);
+    game.bitmaps.detach(game.sys_assets.bmp_checkbox_check);
+    game.bitmaps.detach(game.sys_assets.bmp_cursor);
+    game.bitmaps.detach(game.sys_assets.bmp_cursor_invalid);
+    game.bitmaps.detach(game.sys_assets.bmp_enemy_spirit);
+    game.bitmaps.detach(game.sys_assets.bmp_icon);
+    game.bitmaps.detach(game.sys_assets.bmp_idle_glow);
+    game.bitmaps.detach(game.sys_assets.bmp_mouse_cursor);
+    game.bitmaps.detach(game.sys_assets.bmp_mouse_wd_icon);
+    game.bitmaps.detach(game.sys_assets.bmp_mouse_wu_icon);
+    game.bitmaps.detach(game.sys_assets.bmp_notification);
+    game.bitmaps.detach(game.sys_assets.bmp_pikmin_silhouette);
+    game.bitmaps.detach(game.sys_assets.bmp_pikmin_spirit);
+    game.bitmaps.detach(game.sys_assets.bmp_rock);
+    game.bitmaps.detach(game.sys_assets.bmp_shadow);
+    game.bitmaps.detach(game.sys_assets.bmp_smack);
+    game.bitmaps.detach(game.sys_assets.bmp_smoke);
+    game.bitmaps.detach(game.sys_assets.bmp_sparkle);
+    game.bitmaps.detach(game.sys_assets.bmp_spotlight);
+    game.bitmaps.detach(game.sys_assets.bmp_swarm_arrow);
+    game.bitmaps.detach(game.sys_assets.bmp_wave_ring);
     for(unsigned char i = 0; i < 3; ++i) {
-        bitmaps.detach(bmp_mouse_button_icon[i]);
+        game.bitmaps.detach(game.sys_assets.bmp_mouse_button_icon[i]);
     }
     
-    sfx_attack.destroy();
-    sfx_pikmin_attack.destroy();
-    sfx_pikmin_carrying.destroy();
-    sfx_pikmin_carrying_grab.destroy();
-    sfx_pikmin_caught.destroy();
-    sfx_pikmin_dying.destroy();
-    sfx_pikmin_held.destroy();
-    sfx_pikmin_idle.destroy();
-    sfx_pikmin_thrown.destroy();
-    sfx_pikmin_plucked.destroy();
-    sfx_pikmin_called.destroy();
-    sfx_olimar_whistle.destroy();
-    sfx_louie_whistle.destroy();
-    sfx_president_whistle.destroy();
-    sfx_olimar_name_call.destroy();
-    sfx_louie_name_call.destroy();
-    sfx_president_name_call.destroy();
-    sfx_throw.destroy();
-    sfx_switch_pikmin.destroy();
-    sfx_camera.destroy();
+    game.sys_assets.sfx_attack.destroy();
+    game.sys_assets.sfx_pikmin_attack.destroy();
+    game.sys_assets.sfx_pikmin_carrying.destroy();
+    game.sys_assets.sfx_pikmin_carrying_grab.destroy();
+    game.sys_assets.sfx_pikmin_caught.destroy();
+    game.sys_assets.sfx_pikmin_dying.destroy();
+    game.sys_assets.sfx_pikmin_held.destroy();
+    game.sys_assets.sfx_pikmin_idle.destroy();
+    game.sys_assets.sfx_pikmin_thrown.destroy();
+    game.sys_assets.sfx_pikmin_plucked.destroy();
+    game.sys_assets.sfx_pikmin_called.destroy();
+    game.sys_assets.sfx_throw.destroy();
+    game.sys_assets.sfx_switch_pikmin.destroy();
+    game.sys_assets.sfx_camera.destroy();
 }
 
 
@@ -1586,7 +1610,7 @@ void unload_misc_resources() {
  * Unloads spike damage types loaded in memory.
  */
 void unload_spike_damage_types() {
-    spike_damage_types.clear();
+    game.spike_damage_types.clear();
 }
 
 
@@ -1594,22 +1618,33 @@ void unload_spike_damage_types() {
  * Unloads loaded spray types from memory.
  */
 void unload_spray_types() {
-    for(size_t s = 0; s < spray_types.size(); ++s) {
-        bitmaps.detach(spray_types[s].bmp_spray);
+    for(size_t s = 0; s < game.spray_types.size(); ++s) {
+        game.bitmaps.detach(game.spray_types[s].bmp_spray);
     }
-    spray_types.clear();
+    game.spray_types.clear();
 }
 
 
 /* ----------------------------------------------------------------------------
  * Unloads loaded status effect types from memory.
+ * unload_resources:
+ *   If resources got loaded, set this to true to unload them.
  */
 void unload_status_types(const bool unload_resources) {
 
-    if(unload_resources) {
-        for(auto s = status_types.begin(); s != status_types.end(); ++s) {
-            s->second.anim_db.destroy();
+    for(auto &s : game.status_types) {
+        if(unload_resources) {
+            s.second->anim_db.destroy();
         }
+        delete s.second;
     }
-    status_types.clear();
+    game.status_types.clear();
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Unloads loaded weather conditions.
+ */
+void unload_weather() {
+    game.weather_conditions.clear();
 }

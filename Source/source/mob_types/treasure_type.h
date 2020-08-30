@@ -11,8 +11,19 @@
 #ifndef TREASURE_TYPE_INCLUDED
 #define TREASURE_TYPE_INCLUDED
 
-#include "../data_file.h"
+#include "../utils/data_file.h"
 #include "mob_type.h"
+
+
+enum TREASURE_STATES {
+    TREASURE_STATE_IDLE_WAITING,
+    TREASURE_STATE_IDLE_MOVING,
+    TREASURE_STATE_IDLE_STUCK,
+    TREASURE_STATE_BEING_DELIVERED,
+    
+    N_TREASURE_STATES,
+};
+
 
 /* ----------------------------------------------------------------------------
  * A type of treasure.
@@ -26,12 +37,9 @@
 class treasure_type : public mob_type {
 public:
 
-    float value;
-    
     treasure_type();
-    ~treasure_type();
-    void load_parameters(data_node* file);
-    anim_conversion_vector get_anim_conversions();
+    anim_conversion_vector get_anim_conversions() const;
 };
+
 
 #endif //ifndef TREASURE_TYPE_INCLUDED

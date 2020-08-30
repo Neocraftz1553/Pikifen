@@ -13,20 +13,33 @@
 
 #include <allegro5/allegro.h>
 
-#include "../data_file.h"
 #include "../misc_structs.h"
 #include "../spray_type.h"
+#include "../utils/data_file.h"
 #include "mob_type.h"
+
 
 enum RESOURCE_ANIMATIONS {
     RESOURCE_ANIM_IDLING,
 };
+
 
 enum RESOURCE_DELIVERY_RESULTS {
     RESOURCE_DELIVERY_RESULT_DAMAGE_MOB,
     RESOURCE_DELIVERY_RESULT_INCREASE_INGREDIENTS,
     RESOURCE_DELIVERY_RESULT_ADD_POINTS,
 };
+
+
+enum RESOURCE_STATES {
+    RESOURCE_STATE_IDLE_WAITING,
+    RESOURCE_STATE_IDLE_MOVING,
+    RESOURCE_STATE_IDLE_STUCK,
+    RESOURCE_STATE_BEING_DELIVERED,
+    
+    N_RESOURCE_STATES,
+};
+
 
 /* ----------------------------------------------------------------------------
  * A type of resource (gold nugget, bridge fragment, spray ingredient, etc.).
@@ -43,9 +56,9 @@ public:
     float point_amount;
     
     resource_type();
-    ~resource_type();
-    void load_parameters(data_node* file);
-    anim_conversion_vector get_anim_conversions();
+    void load_properties(data_node* file);
+    anim_conversion_vector get_anim_conversions() const;
 };
+
 
 #endif //ifndef RESOURCE_TYPE_INCLUDED

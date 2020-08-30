@@ -16,14 +16,21 @@
 #include "animation.h"
 #include "const.h"
 #include "functions.h"
+#include "game.h"
 #include "gameplay.h"
+#include "mobs/group_task.h"
+#include "mobs/pile.h"
+#include "mobs/scale.h"
 #include "utils/geometry_utils.h"
 #include "utils/string_utils.h"
-#include "vars.h"
+
 
 /* ----------------------------------------------------------------------------
  * Does the drawing for the main game loop.
- * bmp_output: if not NULL, draw the area onto this.
+ * bmp_output:
+ *   If not NULL, draw the area onto this.
+ * bmp_transform:
+ *   Transformation to use when drawing to a bitmap.
  */
 void gameplay::do_game_drawing(
     ALLEGRO_BITMAP* bmp_output, ALLEGRO_TRANSFORM* bmp_transform
@@ -37,8 +44,6 @@ void gameplay::do_game_drawing(
     
     if(!paused) {
     
-        cur_sun_strength = get_sun_strength();
-        
         ALLEGRO_TRANSFORM world_to_screen_drawing_transform;
         
         if(bmp_output) {
@@ -50,50 +55,92 @@ void gameplay::do_game_drawing(
                 ALLEGRO_ONE, ALLEGRO_INVERSE_ALPHA
             );
         } else {
-            world_to_screen_drawing_transform = world_to_screen_transform;
+            world_to_screen_drawing_transform = game.world_to_screen_transform;
         }
         
-        al_clear_to_color(cur_area_data.bg_color);
+        al_clear_to_color(game.cur_area_data.bg_color);
         
         //Layer 1 -- Background.
+        if(game.perf_mon) {
+            game.perf_mon->start_measurement("Drawing -- Background");
+        }
         draw_background(bmp_output);
+        if(game.perf_mon) {
+            game.perf_mon->finish_measurement();
+        }
         
         //Layer 2 -- World components.
+        if(game.perf_mon) {
+            game.perf_mon->start_measurement("Drawing -- World");
+        }
         al_use_transform(&world_to_screen_drawing_transform);
         draw_world_components(bmp_output);
+        if(game.perf_mon) {
+            game.perf_mon->finish_measurement();
+        }
         
         //Layer 3 -- In-game text.
+        if(game.perf_mon) {
+            game.perf_mon->start_measurement("Drawing -- In-game text");
+        }
         if(!bmp_output) {
             draw_ingame_text();
         }
+        if(game.perf_mon) {
+            game.perf_mon->finish_measurement();
+        }
         
         //Layer 4 -- Precipitation.
+        if(game.perf_mon) {
+            game.perf_mon->start_measurement("Drawing -- precipitation");
+        }
         if(!bmp_output) {
             draw_precipitation();
         }
+        if(game.perf_mon) {
+            game.perf_mon->finish_measurement();
+        }
         
         //Layer 5 -- Tree shadows.
-        if(!(bmp_output && !creator_tool_area_image_shadows)) {
+        if(game.perf_mon) {
+            game.perf_mon->start_measurement("Drawing -- Tree shadows");
+        }
+        if(!(bmp_output && !game.maker_tools.area_image_shadows)) {
             draw_tree_shadows();
+        }
+        if(game.perf_mon) {
+            game.perf_mon->finish_measurement();
         }
         
         //Finish dumping to a bitmap image here.
         if(bmp_output) {
-            al_set_target_backbuffer(display);
+            al_set_target_backbuffer(game.display);
             return;
         }
         
         //Layer 6 -- Lighting filter.
+        if(game.perf_mon) {
+            game.perf_mon->start_measurement("Drawing -- Lighting");
+        }
         draw_lighting_filter();
+        if(game.perf_mon) {
+            game.perf_mon->finish_measurement();
+        }
         
         //Layer 7 -- Cursor.
         draw_cursor(world_to_screen_drawing_transform);
         
         //Layer 8 -- HUD
-        if(cur_message.empty()) {
+        if(game.perf_mon) {
+            game.perf_mon->start_measurement("Drawing -- HUD");
+        }
+        if(!msg_box) {
             draw_hud();
         } else {
             draw_message_box();
+        }
+        if(game.perf_mon) {
+            game.perf_mon->finish_measurement();
         }
         
         //Layer 9 -- System stuff.
@@ -105,13 +152,13 @@ void gameplay::do_game_drawing(
     
     if(area_title_fade_timer.time_left > 0) {
         draw_loading_screen(
-            cur_area_data.name,
-            cur_area_data.subtitle,
+            game.cur_area_data.name,
+            game.cur_area_data.subtitle,
             area_title_fade_timer.get_ratio_left()
         );
     }
     
-    fade_mgr.draw();
+    game.fade_mgr.draw();
     
     al_flip_display();
 }
@@ -119,9 +166,11 @@ void gameplay::do_game_drawing(
 
 /* ----------------------------------------------------------------------------
  * Draws the area background.
+ * bmp_output:
+ *   If not NULL, draw the background onto this.
  */
 void gameplay::draw_background(ALLEGRO_BITMAP* bmp_output) {
-    if(!cur_area_data.bg_bmp) return;
+    if(!game.cur_area_data.bg_bmp) return;
     
     ALLEGRO_VERTEX bg_v[4];
     for(unsigned char v = 0; v < 4; ++v) {
@@ -132,33 +181,49 @@ void gameplay::draw_background(ALLEGRO_BITMAP* bmp_output) {
     //Not gonna lie, this uses some fancy-shmancy numbers.
     //I mostly got here via trial and error.
     //I apologize if you're trying to understand what it means.
-    int bmp_w = bmp_output ? al_get_bitmap_width(bmp_output) : scr_w;
-    int bmp_h = bmp_output ? al_get_bitmap_height(bmp_output) : scr_h;
-    float zoom_to_use = bmp_output ? 0.5 : cam_zoom;
+    int bmp_w = bmp_output ? al_get_bitmap_width(bmp_output) : game.win_w;
+    int bmp_h = bmp_output ? al_get_bitmap_height(bmp_output) : game.win_h;
+    float zoom_to_use = bmp_output ? 0.5 : game.cam.zoom;
     point final_zoom(
-        bmp_w * 0.5 * cur_area_data.bg_dist / zoom_to_use,
-        bmp_h * 0.5 * cur_area_data.bg_dist / zoom_to_use
+        bmp_w * 0.5 * game.cur_area_data.bg_dist / zoom_to_use,
+        bmp_h * 0.5 * game.cur_area_data.bg_dist / zoom_to_use
     );
     
-    bg_v[0].x = 0;
-    bg_v[0].y = 0;
-    bg_v[0].u = (cam_pos.x - final_zoom.x) / cur_area_data.bg_bmp_zoom;
-    bg_v[0].v = (cam_pos.y - final_zoom.y) / cur_area_data.bg_bmp_zoom;
-    bg_v[1].x = bmp_w;
-    bg_v[1].y = 0;
-    bg_v[1].u = (cam_pos.x + final_zoom.x) / cur_area_data.bg_bmp_zoom;
-    bg_v[1].v = (cam_pos.y - final_zoom.y) / cur_area_data.bg_bmp_zoom;
-    bg_v[2].x = bmp_w;
-    bg_v[2].y = bmp_h;
-    bg_v[2].u = (cam_pos.x + final_zoom.x) / cur_area_data.bg_bmp_zoom;
-    bg_v[2].v = (cam_pos.y + final_zoom.y) / cur_area_data.bg_bmp_zoom;
-    bg_v[3].x = 0;
-    bg_v[3].y = bmp_h;
-    bg_v[3].u = (cam_pos.x - final_zoom.x) / cur_area_data.bg_bmp_zoom;
-    bg_v[3].v = (cam_pos.y + final_zoom.y) / cur_area_data.bg_bmp_zoom;
-    
+    bg_v[0].x =
+        0;
+    bg_v[0].y =
+        0;
+    bg_v[0].u =
+        (game.cam.pos.x - final_zoom.x) / game.cur_area_data.bg_bmp_zoom;
+    bg_v[0].v =
+        (game.cam.pos.y - final_zoom.y) / game.cur_area_data.bg_bmp_zoom;
+    bg_v[1].x =
+        bmp_w;
+    bg_v[1].y =
+        0;
+    bg_v[1].u =
+        (game.cam.pos.x + final_zoom.x) / game.cur_area_data.bg_bmp_zoom;
+    bg_v[1].v =
+        (game.cam.pos.y - final_zoom.y) / game.cur_area_data.bg_bmp_zoom;
+    bg_v[2].x =
+        bmp_w;
+    bg_v[2].y =
+        bmp_h;
+    bg_v[2].u =
+        (game.cam.pos.x + final_zoom.x) / game.cur_area_data.bg_bmp_zoom;
+    bg_v[2].v =
+        (game.cam.pos.y + final_zoom.y) / game.cur_area_data.bg_bmp_zoom;
+    bg_v[3].x =
+        0;
+    bg_v[3].y =
+        bmp_h;
+    bg_v[3].u =
+        (game.cam.pos.x - final_zoom.x) / game.cur_area_data.bg_bmp_zoom;
+    bg_v[3].v =
+        (game.cam.pos.y + final_zoom.y) / game.cur_area_data.bg_bmp_zoom;
+        
     al_draw_prim(
-        bg_v, NULL, cur_area_data.bg_bmp,
+        bg_v, NULL, game.cur_area_data.bg_bmp,
         0, 4, ALLEGRO_PRIM_TRIANGLE_FAN
     );
 }
@@ -166,6 +231,8 @@ void gameplay::draw_background(ALLEGRO_BITMAP* bmp_output) {
 
 /* ----------------------------------------------------------------------------
  * Draws the cursor.
+ * world_to_screen_drawing_transform:
+ *   Use this transformation to get the cursor coordinates.
  */
 void gameplay::draw_cursor(
     ALLEGRO_TRANSFORM &world_to_screen_drawing_transform
@@ -173,35 +240,37 @@ void gameplay::draw_cursor(
 
     al_use_transform(&world_to_screen_drawing_transform);
     
-    size_t n_arrows = group_move_arrows.size();
+    size_t n_arrows = swarm_arrows.size();
     for(size_t a = 0; a < n_arrows; ++a) {
         point pos(
-            cos(group_move_angle) * group_move_arrows[a],
-            sin(group_move_angle) * group_move_arrows[a]
+            cos(swarm_angle) * swarm_arrows[a],
+            sin(swarm_angle) * swarm_arrows[a]
         );
         float alpha =
-            64 + min(
+            64 + std::min(
                 191,
                 (int) (
-                    191 * (group_move_arrows[a] / (cursor_max_dist * 0.4))
+                    191 *
+                    (swarm_arrows[a] / (game.config.cursor_max_dist * 0.4))
                 )
             );
         draw_bitmap(
-            bmp_group_move_arrow,
+            game.sys_assets.bmp_swarm_arrow,
             cur_leader_ptr->pos + pos,
-            point(16 * (1 + group_move_arrows[a] / cursor_max_dist), -1),
-            group_move_angle,
+            point(16 * (1 + swarm_arrows[a] / game.config.cursor_max_dist), -1),
+            swarm_angle,
             map_alpha(alpha)
         );
     }
     
-    size_t n_rings = whistle_rings.size();
+    size_t n_rings = whistle.rings.size();
+    float cursor_angle = get_angle(cur_leader_ptr->pos, leader_cursor_w);
     for(size_t r = 0; r < n_rings; ++r) {
         point pos(
-            cur_leader_ptr->pos.x + cos(cursor_angle) * whistle_rings[r],
-            cur_leader_ptr->pos.y + sin(cursor_angle) * whistle_rings[r]
+            cur_leader_ptr->pos.x + cos(cursor_angle) * whistle.rings[r],
+            cur_leader_ptr->pos.y + sin(cursor_angle) * whistle.rings[r]
         );
-        unsigned char n = whistle_ring_colors[r];
+        unsigned char n = whistle.ring_colors[r];
         al_draw_circle(
             pos.x, pos.y, 8,
             al_map_rgba(
@@ -213,8 +282,8 @@ void gameplay::draw_cursor(
         );
     }
     
-    if(whistle_radius > 0 || whistle_fade_timer.time_left > 0.0f) {
-        if(pretty_whistle) {
+    if(whistle.radius > 0 || whistle.fade_timer.time_left > 0.0f) {
+        if(game.options.pretty_whistle) {
             unsigned char n_dots = 16 * 6;
             for(unsigned char d = 0; d < 6; ++d) {
                 for(unsigned char d2 = 0; d2 < 16; ++d2) {
@@ -226,47 +295,55 @@ void gameplay::draw_cursor(
                         
                     point dot_pos(
                         leader_cursor_w.x +
-                        cos(angle) * whistle_dot_radius[d],
+                        cos(angle) * whistle.dot_radius[d],
                         leader_cursor_w.y +
-                        sin(angle) * whistle_dot_radius[d]
+                        sin(angle) * whistle.dot_radius[d]
                     );
                     
                     ALLEGRO_COLOR c;
                     float alpha_mult;
-                    if(whistle_fade_timer.time_left > 0.0f)
-                        alpha_mult = whistle_fade_timer.get_ratio_left();
+                    if(whistle.fade_timer.time_left > 0.0f)
+                        alpha_mult = whistle.fade_timer.get_ratio_left();
                     else
                         alpha_mult = 1;
                         
-                    if(d == 0) {
+                    switch(d) {
+                    case 0: {
                         //Red.
                         c = al_map_rgba(255, 0,   0,   255 * alpha_mult);
-                    } else if(d == 1) {
+                        break;
+                    } case 1: {
                         //Orange.
                         c = al_map_rgba(255, 128, 0,   210 * alpha_mult);
-                    } else if(d == 2) {
+                        break;
+                    } case 2: {
                         //Lime.
                         c = al_map_rgba(128, 255, 0,   165 * alpha_mult);
-                    } else if(d == 3) {
+                        break;
+                    } case 3: {
                         //Cyan.
                         c = al_map_rgba(0,   255, 255, 120 * alpha_mult);
-                    } else if(d == 4) {
+                        break;
+                    } case 4: {
                         //Blue.
                         c = al_map_rgba(0,   0,   255, 75  * alpha_mult);
-                    } else {
+                        break;
+                    } default: {
                         //Purple.
                         c = al_map_rgba(128, 0,   255, 30  * alpha_mult);
+                        break;
+                    }
                     }
                     
                     al_draw_filled_circle(dot_pos.x, dot_pos.y, 2, c);
                 }
             }
         } else {
-            unsigned char alpha = whistle_fade_timer.get_ratio_left() * 255;
-            float radius = whistle_fade_radius;
-            if(whistle_radius > 0) {
+            unsigned char alpha = whistle.fade_timer.get_ratio_left() * 255;
+            float radius = whistle.fade_radius;
+            if(whistle.radius > 0) {
                 alpha = 255;
-                radius = whistle_radius;
+                radius = whistle.radius;
             }
             al_draw_circle(
                 leader_cursor_w.x, leader_cursor_w.y, radius,
@@ -276,8 +353,8 @@ void gameplay::draw_cursor(
     }
     
     //Cursor trail
-    al_use_transform(&identity_transform);
-    if(draw_cursor_trail) {
+    al_use_transform(&game.identity_transform);
+    if(game.options.draw_cursor_trail) {
         for(size_t p = 1; p < cursor_spots.size(); ++p) {
             point* p_ptr = &cursor_spots[p];
             point* pp_ptr = &cursor_spots[p - 1]; //Previous point.
@@ -300,13 +377,15 @@ void gameplay::draw_cursor(
     
     //Mouse cursor.
     draw_bitmap(
-        bmp_mouse_cursor,
-        mouse_cursor_s,
+        game.sys_assets.bmp_mouse_cursor,
+        game.mouse_cursor_s,
         point(
-            cam_zoom * al_get_bitmap_width(bmp_mouse_cursor) * 0.5,
-            cam_zoom * al_get_bitmap_height(bmp_mouse_cursor) * 0.5
+            game.cam.zoom *
+            al_get_bitmap_width(game.sys_assets.bmp_mouse_cursor) * 0.5,
+            game.cam.zoom *
+            al_get_bitmap_height(game.sys_assets.bmp_mouse_cursor) * 0.5
         ),
-        -(area_time_passed * cursor_spin_speed),
+        -(area_time_passed * game.config.cursor_spin_speed),
         change_color_lighting(
             cur_leader_ptr->lea_type->main_color,
             cursor_height_diff_light
@@ -316,11 +395,11 @@ void gameplay::draw_cursor(
     //Leader cursor.
     al_use_transform(&world_to_screen_drawing_transform);
     draw_bitmap(
-        bmp_cursor,
+        game.sys_assets.bmp_cursor,
         leader_cursor_w,
         point(
-            al_get_bitmap_width(bmp_cursor) * 0.5,
-            al_get_bitmap_height(bmp_cursor) * 0.5
+            al_get_bitmap_width(game.sys_assets.bmp_cursor) * 0.5,
+            al_get_bitmap_height(game.sys_assets.bmp_cursor) * 0.5
         ),
         cursor_angle,
         change_color_lighting(
@@ -331,14 +410,15 @@ void gameplay::draw_cursor(
     
     if(!throw_can_reach_cursor) {
         unsigned char alpha =
-            0 + (sin(cursor_invalid_effect) + 1) * 127.0;
+            0 +
+            (sin(area_time_passed * CURSOR_INVALID_EFFECT_SPEED) + 1) * 127.0;
             
         draw_bitmap(
-            bmp_cursor_invalid,
+            game.sys_assets.bmp_cursor_invalid,
             leader_cursor_w,
             point(
-                al_get_bitmap_width(bmp_cursor) * 0.5,
-                al_get_bitmap_height(bmp_cursor) * 0.5
+                al_get_bitmap_width(game.sys_assets.bmp_cursor) * 0.5,
+                al_get_bitmap_height(game.sys_assets.bmp_cursor) * 0.5
             ),
             0,
             change_alpha(cur_leader_ptr->lea_type->main_color, alpha)
@@ -351,14 +431,15 @@ void gameplay::draw_cursor(
  * Draws the HUD.
  */
 void gameplay::draw_hud() {
-    al_use_transform(&identity_transform);
+    al_use_transform(&game.identity_transform);
     point i_center, i_size;
     
     //Leader health.
     for(size_t l = 0; l < 3; ++l) {
-        if(leaders.size() < l + 1) continue;
+        if(mobs.leaders.size() < l + 1) continue;
         
-        size_t l_nr = sum_and_wrap(cur_leader_nr, l, leaders.size());
+        size_t l_nr =
+            (size_t) sum_and_wrap(cur_leader_nr, l, mobs.leaders.size());
         size_t icon_id = HUD_ITEM_LEADER_1_ICON + l;
         size_t health_id = HUD_ITEM_LEADER_1_HEALTH + l;
         
@@ -366,11 +447,11 @@ void gameplay::draw_hud() {
         if(hud_items.get_draw_data(icon_id, &i_center, &i_size)) {
             al_draw_filled_circle(
                 i_center.x, i_center.y,
-                min(i_size.x, i_size.y) / 2.0f,
-                change_alpha(leaders[l_nr]->type->main_color, 128)
+                std::min(i_size.x, i_size.y) / 2.0f,
+                change_alpha(mobs.leaders[l_nr]->type->main_color, 128)
             );
             draw_bitmap_in_box(
-                leaders[l_nr]->lea_type->bmp_icon,
+                mobs.leaders[l_nr]->lea_type->bmp_icon,
                 i_center, i_size
             );
             draw_bitmap_in_box(bmp_bubble, i_center, i_size);
@@ -381,8 +462,9 @@ void gameplay::draw_hud() {
         if(hud_items.get_draw_data(health_id, &i_center, &i_size)) {
             draw_health(
                 i_center,
-                leaders[l_nr]->health, leaders[l_nr]->type->max_health,
-                min(i_size.x, i_size.y) * 0.4f,
+                mobs.leaders[l_nr]->health,
+                mobs.leaders[l_nr]->type->max_health,
+                std::min(i_size.x, i_size.y) * 0.4f,
                 true
             );
             draw_bitmap_in_box(bmp_hard_bubble, i_center, i_size);
@@ -393,10 +475,13 @@ void gameplay::draw_hud() {
     //Sun Meter.
     if(hud_items.get_draw_data(HUD_ITEM_TIME, &i_center, &i_size)) {
         unsigned char n_hours =
-            (day_minutes_end - day_minutes_start) / 60.0f;
+            (game.config.day_minutes_end -
+             game.config.day_minutes_start) / 60.0f;
+        float day_length =
+            game.config.day_minutes_end - game.config.day_minutes_start;
         float day_passed_ratio =
-            (float) (day_minutes - day_minutes_start) /
-            (float) (day_minutes_end - day_minutes_start);
+            (float) (day_minutes - game.config.day_minutes_start) /
+            (float) (day_length);
         float sun_radius = i_size.y / 2.0;
         float first_dot_x = (i_center.x - i_size.x / 2.0) + sun_radius;
         float last_dot_x = (i_center.x + i_size.x / 2.0) - sun_radius;
@@ -460,7 +545,7 @@ void gameplay::draw_hud() {
     //Day number text.
     if(hud_items.get_draw_data(HUD_ITEM_DAY_NUMBER, &i_center, &i_size)) {
         draw_compressed_text(
-            font_counter, al_map_rgb(255, 255, 255),
+            game.fonts.counter, al_map_rgb(255, 255, 255),
             i_center, ALLEGRO_ALIGN_CENTER, 1,
             i_size, i2s(day)
         );
@@ -473,19 +558,24 @@ void gameplay::draw_hud() {
         SUBGROUP_TYPE_CATEGORIES c =
             cur_leader_ptr->group->cur_standby_type->get_category();
             
-        if(c == SUBGROUP_TYPE_CATEGORY_LEADER) {
+        switch(c) {
+        case SUBGROUP_TYPE_CATEGORY_LEADER: {
             leader* l_ptr = dynamic_cast<leader*>(closest_group_member);
             standby_bmp = l_ptr->lea_type->bmp_icon;
+            break;
             
-        } else if(c == SUBGROUP_TYPE_CATEGORY_PIKMIN) {
+        } case SUBGROUP_TYPE_CATEGORY_PIKMIN: {
             pikmin* p_ptr = dynamic_cast<pikmin*>(closest_group_member);
             standby_bmp = cur_leader_ptr->group->cur_standby_type->get_icon();
             standby_mat_bmp =
                 p_ptr->pik_type->bmp_maturity_icon[p_ptr->maturity];
-                
-        } else {
-            standby_bmp = cur_leader_ptr->group->cur_standby_type->get_icon();
+            break;
             
+        } default: {
+            standby_bmp = cur_leader_ptr->group->cur_standby_type->get_icon();
+            break;
+            
+        }
         }
     }
     if(!standby_bmp) standby_bmp = bmp_no_pikmin_bubble;
@@ -520,7 +610,7 @@ void gameplay::draw_hud() {
     //Pikmin count "x".
     if(hud_items.get_draw_data(HUD_ITEM_PIKMIN_STANDBY_X, &i_center, &i_size)) {
         draw_compressed_text(
-            font_counter, al_map_rgb(255, 255, 255),
+            game.fonts.counter, al_map_rgb(255, 255, 255),
             i_center, ALLEGRO_ALIGN_CENTER, 1, i_size, "x"
         );
     }
@@ -547,7 +637,7 @@ void gameplay::draw_hud() {
         
         draw_bitmap(bmp_counter_bubble_standby, i_center, i_size);
         draw_compressed_text(
-            font_counter, al_map_rgb(255, 255, 255),
+            game.fonts.counter, al_map_rgb(255, 255, 255),
             point(i_center.x + i_size.x * 0.4, i_center.y),
             ALLEGRO_ALIGN_RIGHT, 1, i_size * 0.7, i2s(n_standby_pikmin)
         );
@@ -558,18 +648,18 @@ void gameplay::draw_hud() {
         hud_items.get_draw_data(HUD_ITEM_PIKMIN_GROUP_NR, &i_center, &i_size)
     ) {
         size_t pikmin_in_group = cur_leader_ptr->group->members.size();
-        for(size_t l = 0; l < leaders.size(); ++l) {
+        for(size_t l = 0; l < mobs.leaders.size(); ++l) {
             //If this leader is following the current one,
             //then they're not a Pikmin.
             //Subtract them from the group count total.
-            if(leaders[l]->following_group == cur_leader_ptr) {
+            if(mobs.leaders[l]->following_group == cur_leader_ptr) {
                 pikmin_in_group--;
             }
         }
         
         draw_bitmap(bmp_counter_bubble_group, i_center, i_size);
         draw_compressed_text(
-            font_counter, al_map_rgb(255, 255, 255),
+            game.fonts.counter, al_map_rgb(255, 255, 255),
             point(i_center.x + i_size.x * 0.4, i_center.y),
             ALLEGRO_ALIGN_RIGHT, 1, i_size * 0.7, i2s(pikmin_in_group)
         );
@@ -581,9 +671,9 @@ void gameplay::draw_hud() {
     ) {
         draw_bitmap(bmp_counter_bubble_field, i_center, i_size);
         draw_compressed_text(
-            font_counter, al_map_rgb(255, 255, 255),
+            game.fonts.counter, al_map_rgb(255, 255, 255),
             point(i_center.x + i_size.x * 0.4, i_center.y),
-            ALLEGRO_ALIGN_RIGHT, 1, i_size * 0.7, i2s(pikmin_list.size())
+            ALLEGRO_ALIGN_RIGHT, 1, i_size * 0.7, i2s(mobs.pikmin_list.size())
         );
     }
     
@@ -591,16 +681,16 @@ void gameplay::draw_hud() {
     if(
         hud_items.get_draw_data(HUD_ITEM_PIKMIN_TOTAL_NR, &i_center, &i_size)
     ) {
-        unsigned long total_pikmin = pikmin_list.size();
-        for(size_t o = 0; o < onions.size(); ++o) {
+        size_t total_pikmin = mobs.pikmin_list.size();
+        for(size_t o = 0; o < mobs.onions.size(); ++o) {
             for(size_t m = 0; m < N_MATURITIES; ++m) {
-                total_pikmin += onions[o]->pikmin_inside[m];
+                total_pikmin += mobs.onions[o]->pikmin_inside[m];
             }
         }
         
         draw_bitmap(bmp_counter_bubble_total, i_center, i_size);
         draw_compressed_text(
-            font_counter, al_map_rgb(255, 255, 255),
+            game.fonts.counter, al_map_rgb(255, 255, 255),
             point(i_center.x + i_size.x * 0.4, i_center.y),
             ALLEGRO_ALIGN_RIGHT, 1, i_size * 0.7, i2s(total_pikmin)
         );
@@ -611,7 +701,7 @@ void gameplay::draw_hud() {
         hud_items.get_draw_data(HUD_ITEM_PIKMIN_SLASH_1, &i_center, &i_size)
     ) {
         draw_compressed_text(
-            font_counter, al_map_rgb(255, 255, 255),
+            game.fonts.counter, al_map_rgb(255, 255, 255),
             i_center, ALLEGRO_ALIGN_CENTER, 1, i_size, "/"
         );
     }
@@ -619,7 +709,7 @@ void gameplay::draw_hud() {
         hud_items.get_draw_data(HUD_ITEM_PIKMIN_SLASH_2, &i_center, &i_size)
     ) {
         draw_compressed_text(
-            font_counter, al_map_rgb(255, 255, 255),
+            game.fonts.counter, al_map_rgb(255, 255, 255),
             i_center, ALLEGRO_ALIGN_CENTER, 1, i_size, "/"
         );
     }
@@ -627,16 +717,16 @@ void gameplay::draw_hud() {
         hud_items.get_draw_data(HUD_ITEM_PIKMIN_SLASH_3, &i_center, &i_size)
     ) {
         draw_compressed_text(
-            font_counter, al_map_rgb(255, 255, 255),
+            game.fonts.counter, al_map_rgb(255, 255, 255),
             i_center, ALLEGRO_ALIGN_CENTER, 1, i_size, "/"
         );
     }
     
     
     //Sprays.
-    if(spray_types.size() > 0) {
+    if(game.spray_types.size() > 0) {
         size_t top_spray_nr;
-        if(spray_types.size() <= 2) top_spray_nr = 0;
+        if(game.spray_types.size() <= 2) top_spray_nr = 0;
         else top_spray_nr = selected_spray;
         
         //Top or current spray.
@@ -644,7 +734,7 @@ void gameplay::draw_hud() {
             hud_items.get_draw_data(HUD_ITEM_SPRAY_1_ICON, &i_center, &i_size)
         ) {
             draw_bitmap_in_box(
-                spray_types[top_spray_nr].bmp_spray, i_center, i_size
+                game.spray_types[top_spray_nr].bmp_spray, i_center, i_size
             );
         }
         
@@ -652,7 +742,7 @@ void gameplay::draw_hud() {
             hud_items.get_draw_data(HUD_ITEM_SPRAY_1_AMOUNT, &i_center, &i_size)
         ) {
             draw_compressed_text(
-                font_counter, al_map_rgb(255, 255, 255),
+                game.fonts.counter, al_map_rgb(255, 255, 255),
                 point(i_center.x - i_size.x / 2.0, i_center.y),
                 ALLEGRO_ALIGN_LEFT, 1, i_size,
                 "x" + i2s(spray_stats[top_spray_nr].nr_sprays)
@@ -662,23 +752,28 @@ void gameplay::draw_hud() {
         if(
             hud_items.get_draw_data(HUD_ITEM_SPRAY_1_BUTTON, &i_center, &i_size)
         ) {
-            for(size_t c = 0; c < controls[0].size(); ++c) {
+            for(size_t c = 0; c < game.options.controls[0].size(); ++c) {
                 if(
                     (
-                        controls[0][c].action == BUTTON_USE_SPRAY_1 &&
-                        spray_types.size() <= 2
+                        game.options.controls[0][c].action ==
+                        BUTTON_USE_SPRAY_1 &&
+                        game.spray_types.size() <= 2
                     ) || (
-                        controls[0][c].action == BUTTON_USE_SPRAY &&
-                        spray_types.size() >= 3
+                        game.options.controls[0][c].action ==
+                        BUTTON_USE_SPRAY &&
+                        game.spray_types.size() >= 3
                     )
                 ) {
-                    draw_control(font_main, controls[0][c], i_center, i_size);
+                    draw_control(
+                        game.fonts.main,
+                        game.options.controls[0][c], i_center, i_size
+                    );
                     break;
                 }
             }
         }
         
-        if(spray_types.size() == 2) {
+        if(game.spray_types.size() == 2) {
         
             //Secondary spray, when there're only two types.
             if(
@@ -686,7 +781,9 @@ void gameplay::draw_hud() {
                     HUD_ITEM_SPRAY_2_ICON, &i_center, &i_size
                 )
             ) {
-                draw_bitmap_in_box(spray_types[1].bmp_spray, i_center, i_size);
+                draw_bitmap_in_box(
+                    game.spray_types[1].bmp_spray, i_center, i_size
+                );
             }
             
             if(
@@ -696,7 +793,7 @@ void gameplay::draw_hud() {
             ) {
             
                 draw_compressed_text(
-                    font_counter, al_map_rgb(255, 255, 255),
+                    game.fonts.counter, al_map_rgb(255, 255, 255),
                     point(i_center.x - i_size.x / 2.0, i_center.y),
                     ALLEGRO_ALIGN_LEFT, 1, i_size,
                     "x" + i2s(spray_stats[1].nr_sprays)
@@ -708,17 +805,21 @@ void gameplay::draw_hud() {
                     HUD_ITEM_SPRAY_2_BUTTON, &i_center, &i_size
                 )
             ) {
-                for(size_t c = 0; c < controls[0].size(); ++c) {
-                    if(controls[0][c].action == BUTTON_USE_SPRAY_2) {
+                for(size_t c = 0; c < game.options.controls[0].size(); ++c) {
+                    if(
+                        game.options.controls[0][c].action ==
+                        BUTTON_USE_SPRAY_2
+                    ) {
                         draw_control(
-                            font_main, controls[0][c], i_center, i_size
+                            game.fonts.main,
+                            game.options.controls[0][c], i_center, i_size
                         );
                         break;
                     }
                 }
             }
             
-        } else if(spray_types.size() >= 3) {
+        } else if(game.spray_types.size() >= 3) {
         
             //Previous spray info.
             if(
@@ -727,9 +828,11 @@ void gameplay::draw_hud() {
                 )
             ) {
                 draw_bitmap_in_box(
-                    spray_types[
-                        sum_and_wrap(selected_spray, -1, spray_types.size())
-                    ].bmp_spray,
+                    game.spray_types[
+                        (size_t) sum_and_wrap(
+                            selected_spray, -1, game.spray_types.size()
+                        )
+                ].bmp_spray,
                     i_center, i_size
                 );
             }
@@ -739,10 +842,14 @@ void gameplay::draw_hud() {
                     HUD_ITEM_SPRAY_PREV_BUTTON, &i_center, &i_size
                 )
             ) {
-                for(size_t c = 0; c < controls[0].size(); ++c) {
-                    if(controls[0][c].action == BUTTON_PREV_SPRAY) {
+                for(size_t c = 0; c < game.options.controls[0].size(); ++c) {
+                    if(
+                        game.options.controls[0][c].action ==
+                        BUTTON_PREV_SPRAY
+                    ) {
                         draw_control(
-                            font_main, controls[0][c], i_center, i_size
+                            game.fonts.main,
+                            game.options.controls[0][c], i_center, i_size
                         );
                         break;
                     }
@@ -756,9 +863,11 @@ void gameplay::draw_hud() {
                 )
             ) {
                 draw_bitmap_in_box(
-                    spray_types[
-                        sum_and_wrap(selected_spray, 1, spray_types.size())
-                    ].bmp_spray,
+                    game.spray_types[
+                        (size_t) sum_and_wrap(
+                            selected_spray, 1, game.spray_types.size()
+                        )
+                ].bmp_spray,
                     i_center, i_size
                 );
             }
@@ -768,10 +877,14 @@ void gameplay::draw_hud() {
                     HUD_ITEM_SPRAY_NEXT_BUTTON, &i_center, &i_size
                 )
             ) {
-                for(size_t c = 0; c < controls[0].size(); ++c) {
-                    if(controls[0][c].action == BUTTON_NEXT_SPRAY) {
+                for(size_t c = 0; c < game.options.controls[0].size(); ++c) {
+                    if(
+                        game.options.controls[0][c].action ==
+                        BUTTON_NEXT_SPRAY
+                    ) {
                         draw_control(
-                            font_main, controls[0][c], i_center, i_size
+                            game.fonts.main,
+                            game.options.controls[0][c], i_center, i_size
                         );
                         break;
                     }
@@ -787,40 +900,46 @@ void gameplay::draw_hud() {
  */
 void gameplay::draw_ingame_text() {
     //Fractions and health.
-    size_t n_mobs = mobs.size();
+    size_t n_mobs = mobs.all.size();
     for(size_t m = 0; m < n_mobs; ++m) {
-        mob* mob_ptr = mobs[m];
+        mob* mob_ptr = mobs.all[m];
         
-        if(mob_ptr->carry_info) {
-            if(
-                mob_ptr->carry_info->cur_carrying_strength > 0 &&
-                mob_ptr->type->weight > 1
-            ) {
+        if(
+            mob_ptr->carry_info &&
+            mob_ptr->carry_info->cur_carrying_strength > 0
+        ) {
+            bool destination_is_onion =
+                mob_ptr->carry_info->intended_mob &&
+                mob_ptr->carry_info->intended_mob->type->category->id ==
+                MOB_CATEGORY_ONIONS;
+                
+            if(mob_ptr->type->weight > 1 || destination_is_onion) {
                 ALLEGRO_COLOR color;
-                bool valid = false;
                 if(mob_ptr->carry_info->is_moving) {
                     if(
                         mob_ptr->carry_info->destination ==
                         CARRY_DESTINATION_SHIP
                     ) {
-                        color = carrying_color_move;
-                        valid = true;
-                    } else if(mob_ptr->carry_info->intended_mob) {
+                        color = game.config.carrying_color_move;
+                        
+                    } else if(destination_is_onion) {
                         color =
                             (
                                 (onion*) (mob_ptr->carry_info->intended_mob)
                             )->oni_type->pik_type->main_color;
-                        valid = true;
+                    } else {
+                        color = game.config.carrying_color_move;
                     }
+                    
+                } else {
+                    color = game.config.carrying_color_stop;
                 }
-                if(!valid) {
-                    color = carrying_color_stop;
-                }
+                
                 draw_fraction(
                     point(
                         mob_ptr->pos.x,
                         mob_ptr->pos.y - mob_ptr->type->radius -
-                        font_main_h * 1.25
+                        al_get_font_line_height(game.fonts.main) * 1.25
                     ),
                     mob_ptr->carry_info->cur_carrying_strength,
                     mob_ptr->type->weight,
@@ -829,20 +948,70 @@ void gameplay::draw_ingame_text() {
             }
         }
         
-        for(size_t p = 0; p < piles.size(); ++p) {
-            pile* p_ptr = piles[p];
+        for(size_t p = 0; p < mobs.piles.size(); ++p) {
+            pile* p_ptr = mobs.piles[p];
             if(p_ptr->amount > 0 && p_ptr->pil_type->show_amount) {
                 draw_text_lines(
-                    font_main,
-                    carrying_color_stop,
+                    game.fonts.main,
+                    game.config.carrying_color_stop,
                     point(
                         p_ptr->pos.x,
-                        p_ptr->pos.y - p_ptr->type->radius - font_main_h * 1.25
+                        p_ptr->pos.y - p_ptr->type->radius -
+                        al_get_font_line_height(game.fonts.main) * 1.25
                     ),
                     ALLEGRO_ALIGN_CENTER,
                     1,
                     i2s(p_ptr->amount)
                 );
+            }
+        }
+        
+        for(size_t t = 0; t < mobs.group_tasks.size(); ++t) {
+            group_task* t_ptr = mobs.group_tasks[t];
+            if(t_ptr->get_power() > 0) {
+                draw_fraction(
+                    point(
+                        t_ptr->pos.x,
+                        t_ptr->pos.y - t_ptr->type->radius -
+                        al_get_font_line_height(game.fonts.main) * 1.25
+                    ),
+                    t_ptr->get_power(),
+                    t_ptr->tas_type->power_goal,
+                    game.config.carrying_color_stop
+                );
+            }
+        }
+        
+        for(size_t s = 0; s < mobs.scales.size(); ++s) {
+            scale* s_ptr = mobs.scales[s];
+            if(s_ptr->health <= 0) continue;
+            float w = s_ptr->calculate_cur_weight();
+            if(w > 0) {
+                if(s_ptr->sca_type->goal_number > 0) {
+                    draw_fraction(
+                        point(
+                            s_ptr->pos.x,
+                            s_ptr->pos.y - s_ptr->type->radius -
+                            al_get_font_line_height(game.fonts.main) * 1.25
+                        ),
+                        w,
+                        s_ptr->sca_type->goal_number,
+                        game.config.carrying_color_stop
+                    );
+                } else {
+                    draw_text_lines(
+                        game.fonts.main,
+                        game.config.carrying_color_stop,
+                        point(
+                            s_ptr->pos.x,
+                            s_ptr->pos.y - s_ptr->type->radius -
+                            al_get_font_line_height(game.fonts.main) * 1.25
+                        ),
+                        ALLEGRO_ALIGN_CENTER,
+                        1,
+                        i2s(w)
+                    );
+                }
             }
         }
         
@@ -862,19 +1031,24 @@ void gameplay::draw_ingame_text() {
             );
         }
         
-        //Creator tool -- draw hitboxes.
-        if(creator_tool_hitboxes) {
+        //Maker tool -- draw hitboxes.
+        if(game.maker_tools.hitboxes) {
             sprite* s = mob_ptr->anim.get_cur_sprite();
             if(s) {
                 for(size_t h = 0; h < s->hitboxes.size(); ++h) {
                     hitbox* h_ptr = &s->hitboxes[h];
                     ALLEGRO_COLOR hc;
-                    if(h_ptr->type == HITBOX_TYPE_NORMAL) {
+                    switch(h_ptr->type) {
+                    case HITBOX_TYPE_NORMAL: {
                         hc = al_map_rgba(0, 128, 0, 192); //Green.
-                    } else if(h_ptr->type == HITBOX_TYPE_ATTACK) {
+                        break;
+                    } case HITBOX_TYPE_ATTACK: {
                         hc = al_map_rgba(128, 0, 0, 192); //Red.
-                    } else {
+                        break;
+                    } case HITBOX_TYPE_DISABLED: {
                         hc = al_map_rgba(128, 128, 0, 192); //Yellow.
+                        break;
+                    }
                     }
                     point p =
                         mob_ptr->pos + rotate_point(h_ptr->pos, mob_ptr->angle);
@@ -889,7 +1063,7 @@ void gameplay::draw_ingame_text() {
     //Lying down stop notification.
     if(
         cur_leader_ptr->carry_info &&
-        whistle_control_id != INVALID
+        cancel_control_id != INVALID
     ) {
         draw_notification(
             point(
@@ -897,7 +1071,7 @@ void gameplay::draw_ingame_text() {
                 cur_leader_ptr->pos.y -
                 cur_leader_ptr->type->radius
             ),
-            "Get up", &controls[0][whistle_control_id]
+            "Get up", &game.options.controls[0][cancel_control_id]
         );
         done = true;
     }
@@ -906,7 +1080,7 @@ void gameplay::draw_ingame_text() {
     if(
         !done &&
         cur_leader_ptr->auto_plucking &&
-        whistle_control_id != INVALID
+        cancel_control_id != INVALID
     ) {
         draw_notification(
             point(
@@ -914,7 +1088,7 @@ void gameplay::draw_ingame_text() {
                 cur_leader_ptr->pos.y -
                 cur_leader_ptr->type->radius
             ),
-            "Stop", &controls[0][whistle_control_id]
+            "Stop", &game.options.controls[0][cancel_control_id]
         );
         done = true;
     }
@@ -923,7 +1097,7 @@ void gameplay::draw_ingame_text() {
     if(
         !done &&
         close_to_ship_to_heal &&
-        click_control_id != INVALID
+        main_control_id != INVALID
     ) {
         draw_notification(
             point(
@@ -931,7 +1105,7 @@ void gameplay::draw_ingame_text() {
                 close_to_ship_to_heal->beam_final_pos.y -
                 close_to_ship_to_heal->shi_type->beam_radius
             ),
-            "Repair suit", &controls[0][click_control_id]
+            "Repair suit", &game.options.controls[0][main_control_id]
         );
         done = true;
     }
@@ -940,7 +1114,7 @@ void gameplay::draw_ingame_text() {
     if(
         !done &&
         close_to_interactable_to_use &&
-        click_control_id != INVALID
+        main_control_id != INVALID
     ) {
         float pivot_y =
             close_to_interactable_to_use->pos.y -
@@ -948,7 +1122,7 @@ void gameplay::draw_ingame_text() {
         draw_notification(
             point(close_to_interactable_to_use->pos.x, pivot_y),
             close_to_interactable_to_use->int_type->prompt_text,
-            &controls[0][click_control_id]
+            &game.options.controls[0][main_control_id]
         );
         done = true;
     }
@@ -957,7 +1131,7 @@ void gameplay::draw_ingame_text() {
     if(
         !done &&
         close_to_pikmin_to_pluck &&
-        click_control_id != INVALID
+        main_control_id != INVALID
     ) {
         draw_notification(
             point(
@@ -965,7 +1139,7 @@ void gameplay::draw_ingame_text() {
                 close_to_pikmin_to_pluck->pos.y -
                 close_to_pikmin_to_pluck->type->radius
             ),
-            "Pluck", &controls[0][click_control_id]
+            "Pluck", &game.options.controls[0][main_control_id]
         );
         done = true;
     }
@@ -974,7 +1148,7 @@ void gameplay::draw_ingame_text() {
     if(
         !done &&
         close_to_onion_to_open &&
-        click_control_id != INVALID
+        main_control_id != INVALID
     ) {
         draw_notification(
             point(
@@ -982,7 +1156,7 @@ void gameplay::draw_ingame_text() {
                 close_to_onion_to_open->pos.y -
                 close_to_onion_to_open->type->radius
             ),
-            "Call a Pikmin", &controls[0][click_control_id]
+            "Call a Pikmin", &game.options.controls[0][main_control_id]
         );
         done = true;
     }
@@ -993,7 +1167,7 @@ void gameplay::draw_ingame_text() {
  * Draws the full-screen effects that will represent lighting.
  */
 void gameplay::draw_lighting_filter() {
-    al_use_transform(&identity_transform);
+    al_use_transform(&game.identity_transform);
     
     //Draw the fog effect.
     ALLEGRO_COLOR fog_c = get_fog_color();
@@ -1001,23 +1175,23 @@ void gameplay::draw_lighting_filter() {
         //Start by drawing the central fog fade out effect.
         
         point fog_top_left =
-            cam_pos -
+            game.cam.pos -
             point(
-                cur_area_data.weather_condition.fog_far,
-                cur_area_data.weather_condition.fog_far
+                game.cur_area_data.weather_condition.fog_far,
+                game.cur_area_data.weather_condition.fog_far
             );
         point fog_bottom_right =
-            cam_pos +
+            game.cam.pos +
             point(
-                cur_area_data.weather_condition.fog_far,
-                cur_area_data.weather_condition.fog_far
+                game.cur_area_data.weather_condition.fog_far,
+                game.cur_area_data.weather_condition.fog_far
             );
         al_transform_coordinates(
-            &world_to_screen_transform,
+            &game.world_to_screen_transform,
             &fog_top_left.x, &fog_top_left.y
         );
         al_transform_coordinates(
-            &world_to_screen_transform,
+            &game.world_to_screen_transform,
             &fog_bottom_right.x, &fog_bottom_right.y
         );
         
@@ -1040,19 +1214,19 @@ void gameplay::draw_lighting_filter() {
         //Top-right and center-right.
         al_draw_filled_rectangle(
             fog_bottom_right.x, 0,
-            scr_w, fog_bottom_right.y,
+            game.win_w, fog_bottom_right.y,
             fog_c
         );
         //Bottom-right and bottom-center.
         al_draw_filled_rectangle(
             fog_top_left.x, fog_bottom_right.y,
-            scr_w, scr_h,
+            game.win_w, game.win_h,
             fog_c
         );
         //Bottom-left and center-left.
         al_draw_filled_rectangle(
             0, fog_top_left.y,
-            fog_top_left.x, scr_h,
+            fog_top_left.x, game.win_h,
             fog_c
         );
         
@@ -1061,7 +1235,7 @@ void gameplay::draw_lighting_filter() {
     //Draw the daylight.
     ALLEGRO_COLOR daylight_c = get_daylight_color();
     if(daylight_c.a > 0) {
-        al_draw_filled_rectangle(0, 0, scr_w, scr_h, daylight_c);
+        al_draw_filled_rectangle(0, 0, game.win_w, game.win_h, daylight_c);
     }
     
     //Draw the blackout effect.
@@ -1087,17 +1261,17 @@ void gameplay::draw_lighting_filter() {
         //Then, find out spotlights, and draw
         //their lights on the map (as black).
         al_hold_bitmap_drawing(true);
-        for(size_t m = 0; m < mobs.size(); ++m) {
-            if(mobs[m]->hide) continue;
+        for(size_t m = 0; m < mobs.all.size(); ++m) {
+            if(mobs.all[m]->hide) continue;
             
-            point pos = mobs[m]->pos;
+            point pos = mobs.all[m]->pos;
             al_transform_coordinates(
-                &world_to_screen_transform,
+                &game.world_to_screen_transform,
                 &pos.x, &pos.y
             );
-            float radius = mobs[m]->type->radius * 4.0 * cam_zoom;
+            float radius = mobs.all[m]->type->radius * 4.0 * game.cam.zoom;
             al_draw_scaled_bitmap(
-                bmp_spotlight,
+                game.sys_assets.bmp_spotlight,
                 0, 0, 64, 64,
                 pos.x - radius, pos.y - radius,
                 radius * 2.0, radius * 2.0,
@@ -1107,7 +1281,7 @@ void gameplay::draw_lighting_filter() {
         al_hold_bitmap_drawing(false);
         
         //Now, simply darken the screen using the map.
-        al_set_target_backbuffer(display);
+        al_set_target_backbuffer(game.display);
         
         al_draw_bitmap(lightmap_bmp, 0, 0, 0);
         
@@ -1124,41 +1298,51 @@ void gameplay::draw_lighting_filter() {
  * Draws a message box.
  */
 void gameplay::draw_message_box() {
-    al_use_transform(&identity_transform);
+    al_use_transform(&game.identity_transform);
     
     draw_bitmap(
         bmp_message_box,
-        point(scr_w / 2, scr_h - font_main_h * 2 - 4),
-        point(scr_w - 16, font_main_h * 4)
+        point(
+            game.win_w / 2,
+            game.win_h - al_get_font_line_height(game.fonts.main) * 2 - 4
+        ),
+        point(
+            game.win_w - 16,
+            al_get_font_line_height(game.fonts.main) * 4
+        )
     );
     
-    if(cur_message_speaker) {
+    if(msg_box->speaker_icon) {
         draw_bitmap(
-            cur_message_speaker,
-            point(40, scr_h - font_main_h * 4 - 16),
+            msg_box->speaker_icon,
+            point(
+                40,
+                game.win_h - al_get_font_line_height(game.fonts.main) * 4 - 16
+            ),
             point(48, 48)
         );
         draw_bitmap(
             bmp_bubble,
-            point(40, scr_h - font_main_h * 4 - 16),
+            point(
+                40,
+                game.win_h - al_get_font_line_height(game.fonts.main) * 4 - 16
+            ),
             point(64, 64)
         );
     }
     
-    string text =
-        cur_message.substr(
-            cur_message_stopping_chars[cur_message_section],
-            cur_message_char -
-            cur_message_stopping_chars[cur_message_section]
-        );
-    vector<string> lines = split(text, "\n");
+    vector<string> lines = msg_box->get_current_lines();
     
     for(size_t l = 0; l < lines.size(); ++l) {
     
         draw_compressed_text(
-            font_main, al_map_rgb(255, 255, 255),
-            point(24, scr_h - font_main_h * (4 - l) + 8),
-            ALLEGRO_ALIGN_LEFT, 0, point(scr_w - 64, 0),
+            game.fonts.main, al_map_rgb(255, 255, 255),
+            point(
+                24,
+                game.win_h -
+                al_get_font_line_height(game.fonts.main) * (4 - l) + 8
+            ),
+            ALLEGRO_ALIGN_LEFT, 0, point(game.win_w - 64, 0),
             lines[l]
         );
         
@@ -1171,7 +1355,7 @@ void gameplay::draw_message_box() {
  */
 void gameplay::draw_precipitation() {
     if(
-        cur_area_data.weather_condition.precipitation_type !=
+        game.cur_area_data.weather_condition.precipitation_type !=
         PRECIPITATION_TYPE_NONE
     ) {
         size_t n_precipitation_particles = precipitation.size();
@@ -1189,45 +1373,51 @@ void gameplay::draw_precipitation() {
  * Draws system stuff.
  */
 void gameplay::draw_system_stuff() {
-    if(!info_print_text.empty()) {
+    if(!game.maker_tools.info_print_text.empty()) {
         float alpha_mult = 1;
-        if(info_print_timer.time_left < info_print_fade_duration) {
-            alpha_mult = info_print_timer.time_left / info_print_fade_duration;
+        if(
+            game.maker_tools.info_print_timer.time_left <
+            game.maker_tools.info_print_fade_duration
+        ) {
+            alpha_mult =
+                game.maker_tools.info_print_timer.time_left /
+                game.maker_tools.info_print_fade_duration;
         }
         
-        size_t n_lines = split(info_print_text, "\n", true).size();
-        int fh = al_get_font_line_height(font_builtin);
+        size_t n_lines =
+            split(game.maker_tools.info_print_text, "\n", true).size();
+        int fh = al_get_font_line_height(game.fonts.builtin);
         //We add n_lines - 1 because there is a 1px gap between each line.
         int total_height = n_lines * fh + (n_lines - 1);
         
         al_draw_filled_rectangle(
-            0, 0, scr_w, total_height + 16,
+            0, 0, game.win_w, total_height + 16,
             al_map_rgba(0, 0, 0, 96 * alpha_mult)
         );
         draw_text_lines(
-            font_builtin, al_map_rgba(255, 255, 255, 128 * alpha_mult),
-            point(8, 8), 0, 0, info_print_text
+            game.fonts.builtin, al_map_rgba(255, 255, 255, 128 * alpha_mult),
+            point(8, 8), 0, 0, game.maker_tools.info_print_text
         );
     }
     
-    if(show_system_info) {
+    if(game.show_system_info) {
         //Draw the framerate chart.
         al_draw_filled_rectangle(
-            scr_w - FRAMERATE_HISTORY_SIZE, 0,
-            scr_w, 100,
+            game.win_w - FRAMERATE_HISTORY_SIZE, 0,
+            game.win_w, 100,
             al_map_rgba(0, 0, 0, 192)
         );
-        for(size_t f = 0; f < framerate_history.size(); ++f) {
+        for(size_t f = 0; f < game.framerate_history.size(); ++f) {
             al_draw_line(
-                scr_w - FRAMERATE_HISTORY_SIZE + f + 0.5, 0,
-                scr_w - FRAMERATE_HISTORY_SIZE + f + 0.5,
-                round(framerate_history[f]),
+                game.win_w - FRAMERATE_HISTORY_SIZE + f + 0.5, 0,
+                game.win_w - FRAMERATE_HISTORY_SIZE + f + 0.5,
+                round(game.framerate_history[f]),
                 al_map_rgba(24, 96, 192, 192), 1
             );
         }
         al_draw_line(
-            scr_w - FRAMERATE_HISTORY_SIZE, game_fps,
-            scr_w, game_fps,
+            game.win_w - FRAMERATE_HISTORY_SIZE, game.options.target_fps,
+            game.win_w, game.options.target_fps,
             al_map_rgba(128, 224, 128, 48), 1
         );
     }
@@ -1235,14 +1425,59 @@ void gameplay::draw_system_stuff() {
 
 
 /* ----------------------------------------------------------------------------
+ * Draws the current area and mobs to a bitmap and returns it.
+ */
+ALLEGRO_BITMAP* gameplay::draw_to_bitmap() {
+    //First, get the full dimensions of the map.
+    float min_x = FLT_MAX, min_y = FLT_MAX, max_x = -FLT_MAX, max_y = -FLT_MAX;
+    
+    for(size_t v = 0; v < game.cur_area_data.vertexes.size(); v++) {
+        vertex* v_ptr = game.cur_area_data.vertexes[v];
+        min_x = std::min(v_ptr->x, min_x);
+        min_y = std::min(v_ptr->y, min_y);
+        max_x = std::max(v_ptr->x, max_x);
+        max_y = std::max(v_ptr->y, max_y);
+    }
+    
+    //Figure out the scale that will fit on the image.
+    float area_w = max_x - min_x;
+    float area_h = max_y - min_y;
+    float scale = 1.0f;
+    float final_bmp_w = game.maker_tools.area_image_size;
+    float final_bmp_h = game.maker_tools.area_image_size;
+    
+    if(area_w > area_h) {
+        scale = game.maker_tools.area_image_size / area_w;
+        final_bmp_h *= area_h / area_w;
+    } else {
+        scale = game.maker_tools.area_image_size / area_h;
+        final_bmp_w *= area_w / area_h;
+    }
+    
+    //Create the bitmap.
+    ALLEGRO_BITMAP* bmp = al_create_bitmap(final_bmp_w, final_bmp_h);
+    
+    ALLEGRO_TRANSFORM t;
+    al_identity_transform(&t);
+    al_translate_transform(&t, -min_x, -min_y);
+    al_scale_transform(&t, scale, scale);
+    
+    //Begin drawing!
+    do_game_drawing(bmp, &t);
+    
+    return bmp;
+}
+
+
+/* ----------------------------------------------------------------------------
  * Draws tree shadows.
  */
 void gameplay::draw_tree_shadows() {
-    for(size_t s = 0; s < cur_area_data.tree_shadows.size(); ++s) {
-        tree_shadow* s_ptr = cur_area_data.tree_shadows[s];
+    for(size_t s = 0; s < game.cur_area_data.tree_shadows.size(); ++s) {
+        tree_shadow* s_ptr = game.cur_area_data.tree_shadows[s];
         
         unsigned char alpha =
-            ((s_ptr->alpha / 255.0) * cur_sun_strength) * 255;
+            ((s_ptr->alpha / 255.0) * get_sun_strength()) * 255;
             
         draw_bitmap(
             s_ptr->bitmap,
@@ -1263,27 +1498,29 @@ void gameplay::draw_tree_shadows() {
 
 /* ----------------------------------------------------------------------------
  * Draws the components that make up the game world: layout, objects, etc.
+ * bmp_output:
+ *   If not NULL, draw the area onto this.
  */
 void gameplay::draw_world_components(ALLEGRO_BITMAP* bmp_output) {
     vector<world_component> components;
     //Let's reserve some space. We might need more or less,
     //but this is a nice estimate.
     components.reserve(
-        cur_area_data.sectors.size() + //Sectors
-        mobs.size() + //Mob shadows
-        mobs.size() + //Mobs
+        game.cur_area_data.sectors.size() + //Sectors
+        mobs.all.size() + //Mob shadows
+        mobs.all.size() + //Mobs
         particles.get_count() //Particles
     );
     
     //Sectors.
-    for(size_t s = 0; s < cur_area_data.sectors.size(); ++s) {
-        sector* s_ptr = cur_area_data.sectors[s];
+    for(size_t s = 0; s < game.cur_area_data.sectors.size(); ++s) {
+        sector* s_ptr = game.cur_area_data.sectors[s];
         
         if(
             !bmp_output &&
             !rectangles_intersect(
                 s_ptr->bbox[0], s_ptr->bbox[1],
-                cam_box[0], cam_box[1]
+                game.cam.box[0], game.cam.box[1]
             )
         ) {
             //Off-camera.
@@ -1297,11 +1534,11 @@ void gameplay::draw_world_components(ALLEGRO_BITMAP* bmp_output) {
     }
     
     //Particles.
-    particles.fill_component_list(components, cam_box[0], cam_box[1]);
+    particles.fill_component_list(components, game.cam.box[0], game.cam.box[1]);
     
     //Mobs.
-    for(size_t m = 0; m < mobs.size(); ++m) {
-        mob* mob_ptr = mobs[m];
+    for(size_t m = 0; m < mobs.all.size(); ++m) {
+        mob* mob_ptr = mobs.all[m];
         
         if(!bmp_output && mob_ptr->is_off_camera()) {
             //Off-camera.
@@ -1317,7 +1554,7 @@ void gameplay::draw_world_components(ALLEGRO_BITMAP* bmp_output) {
             if(mob_ptr->standing_on_mob) {
                 c.z =
                     mob_ptr->standing_on_mob->z +
-                    mob_ptr->standing_on_mob->type->height;
+                    mob_ptr->standing_on_mob->height;
             } else {
                 c.z = mob_ptr->ground_sector->z;
             }
@@ -1330,27 +1567,35 @@ void gameplay::draw_world_components(ALLEGRO_BITMAP* bmp_output) {
             world_component c;
             c.mob_limb_ptr = mob_ptr;
             
-            if(method == LIMB_DRAW_BELOW_BOTH) {
-                c.z = min(mob_ptr->z, mob_ptr->parent->m->z);
-            } else if(method == LIMB_DRAW_BELOW_CHILD) {
+            switch(method) {
+            case LIMB_DRAW_BELOW_BOTH: {
+                c.z = std::min(mob_ptr->z, mob_ptr->parent->m->z);
+                break;
+            } case LIMB_DRAW_BELOW_CHILD: {
                 c.z = mob_ptr->z;
-            } else if(method == LIMB_DRAW_BELOW_PARENT) {
+                break;
+            } case LIMB_DRAW_BELOW_PARENT: {
                 c.z = mob_ptr->parent->m->z;
-            } else if(method == LIMB_DRAW_ABOVE_PARENT) {
+                break;
+            } case LIMB_DRAW_ABOVE_PARENT: {
                 c.z =
                     mob_ptr->parent->m->z +
-                    mob_ptr->parent->m->type->height +
+                    mob_ptr->parent->m->height +
                     0.001;
-            } else if(method == LIMB_DRAW_ABOVE_CHILD) {
-                c.z = mob_ptr->z + mob_ptr->type->height + 0.001;
-            } else if(method == LIMB_DRAW_ABOVE_BOTH) {
+                break;
+            } case LIMB_DRAW_ABOVE_CHILD: {
+                c.z = mob_ptr->z + mob_ptr->height + 0.001;
+                break;
+            } case LIMB_DRAW_ABOVE_BOTH: {
                 c.z =
-                    max(
+                    std::max(
                         mob_ptr->parent->m->z +
-                        mob_ptr->parent->m->type->height +
+                        mob_ptr->parent->m->height +
                         0.001,
-                        mob_ptr->z + mob_ptr->type->height + 0.001
+                        mob_ptr->z + mob_ptr->height + 0.001
                     );
+                break;
+            }
             }
             
             components.push_back(c);
@@ -1360,9 +1605,9 @@ void gameplay::draw_world_components(ALLEGRO_BITMAP* bmp_output) {
         world_component c;
         c.mob_ptr = mob_ptr;
         if(mob_ptr->holder.m && mob_ptr->holder.above_holder) {
-            c.z = mob_ptr->holder.m->z + mob_ptr->holder.m->type->height + 0.01;
+            c.z = mob_ptr->holder.m->z + mob_ptr->holder.m->height + 0.01;
         } else {
-            c.z = mob_ptr->z + mob_ptr->type->height;
+            c.z = mob_ptr->z + mob_ptr->height;
         }
         components.push_back(c);
         
@@ -1400,29 +1645,46 @@ void gameplay::draw_world_components(ALLEGRO_BITMAP* bmp_output) {
         
             draw_sector_texture(c_ptr->sector_ptr, point(), 1.0f, 1.0f);
             
-            if(c_ptr->sector_ptr->associated_liquid) {
-                draw_liquid(c_ptr->sector_ptr, point(), 1.0f);
+            for(size_t h = 0; h < c_ptr->sector_ptr->hazards.size(); ++h) {
+                if(c_ptr->sector_ptr->hazards[h]->associated_liquid) {
+                    draw_liquid(
+                        c_ptr->sector_ptr,
+                        c_ptr->sector_ptr->hazards[h]->associated_liquid,
+                        point(),
+                        1.0f
+                    );
+                    break;
+                }
             }
             
             draw_sector_shadows(c_ptr->sector_ptr, point(), 1.0f);
             
         } else if(c_ptr->mob_shadow_ptr) {
         
+            float delta_z = 0;
+            if(!c_ptr->mob_shadow_ptr->standing_on_mob) {
+                delta_z =
+                    c_ptr->mob_shadow_ptr->z -
+                    c_ptr->mob_shadow_ptr->ground_sector->z;
+            }
             draw_mob_shadow(
                 c_ptr->mob_shadow_ptr->pos,
                 c_ptr->mob_shadow_ptr->type->radius * 2,
-                c_ptr->mob_shadow_ptr->z -
-                c_ptr->mob_shadow_ptr->ground_sector->z,
+                delta_z,
                 mob_shadow_stretch
             );
             
         } else if(c_ptr->mob_limb_ptr) {
         
-            c_ptr->mob_limb_ptr->draw_limb();
+            if(!c_ptr->mob_limb_ptr->hide) {
+                c_ptr->mob_limb_ptr->draw_limb();
+            }
             
         } else if(c_ptr->mob_ptr) {
         
-            c_ptr->mob_ptr->draw();
+            if(!c_ptr->mob_ptr->hide) {
+                c_ptr->mob_ptr->draw_mob();
+            }
             
         } else if(c_ptr->particle_ptr) {
         
@@ -1434,161 +1696,18 @@ void gameplay::draw_world_components(ALLEGRO_BITMAP* bmp_output) {
 
 
 /* ----------------------------------------------------------------------------
- * Draws the current area and mobs to a bitmap and returns it.
- */
-ALLEGRO_BITMAP* gameplay::draw_to_bitmap() {
-    //First, get the full dimensions of the map.
-    float min_x = FLT_MAX, min_y = FLT_MAX, max_x = FLT_MIN, max_y = FLT_MIN;
-    
-    for(size_t v = 0; v < cur_area_data.vertexes.size(); v++) {
-        vertex* v_ptr = cur_area_data.vertexes[v];
-        min_x = min(v_ptr->x, min_x);
-        min_y = min(v_ptr->y, min_y);
-        max_x = max(v_ptr->x, max_x);
-        max_y = max(v_ptr->y, max_y);
-    }
-    
-    //Figure out the scale that will fit on the image.
-    float area_w = max_x - min_x;
-    float area_h = max_y - min_y;
-    float scale = 1.0f;
-    float final_bmp_w = creator_tool_area_image_size;
-    float final_bmp_h = creator_tool_area_image_size;
-    
-    if(area_w > area_h) {
-        scale = creator_tool_area_image_size / area_w;
-        final_bmp_h *= area_h / area_w;
-    } else {
-        scale = creator_tool_area_image_size / area_h;
-        final_bmp_w *= area_w / area_h;
-    }
-    
-    //Create the bitmap.
-    ALLEGRO_BITMAP* bmp = al_create_bitmap(final_bmp_w, final_bmp_h);
-    
-    ALLEGRO_TRANSFORM t;
-    al_identity_transform(&t);
-    al_translate_transform(&t, -min_x, -min_y);
-    al_scale_transform(&t, scale, scale);
-    
-    //Begin drawing!
-    do_game_drawing(bmp, &t);
-    
-    return bmp;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Draws a key or button on the screen.
- * font:     Font to use for the name.
- * c:        Info on the control.
- * where:    Center of the place to draw at.
- * max_size: Max width or height. Used to compress it if needed.
- *   0 = unlimited.
- */
-void draw_control(
-    const ALLEGRO_FONT* const font, const control_info &c,
-    const point &where, const point &max_size
-) {
-
-    if(c.type == CONTROL_TYPE_MOUSE_BUTTON) {
-        //If it's a mouse click, just draw the icon and be done with it.
-        if(c.button >= 1 && c.button <= 3) {
-        
-            draw_bitmap_in_box(
-                bmp_mouse_button_icon[c.button - 1], where, max_size
-            );
-            return;
-            
-        }
-    }
-    
-    if(
-        c.type == CONTROL_TYPE_MOUSE_WHEEL_UP ||
-        c.type == CONTROL_TYPE_MOUSE_WHEEL_DOWN
-    ) {
-        //Likewise, if it's a mouse wheel move, just draw the icon and leave.
-        ALLEGRO_BITMAP* b = bmp_mouse_wu_icon;
-        if(c.type == CONTROL_TYPE_MOUSE_WHEEL_DOWN) {
-            b = bmp_mouse_wd_icon;
-        }
-        
-        draw_bitmap_in_box(b, where, max_size);
-        return;
-    }
-    
-    string name;
-    if(c.type == CONTROL_TYPE_KEYBOARD_KEY) {
-        name = str_to_upper(al_keycode_to_name(c.button));
-    } else if(
-        c.type == CONTROL_TYPE_JOYSTICK_AXIS_NEG ||
-        c.type == CONTROL_TYPE_JOYSTICK_AXIS_POS
-    ) {
-        name = "AXIS " + i2s(c.stick) + " " + i2s(c.axis);
-        name += c.type == CONTROL_TYPE_JOYSTICK_AXIS_NEG ? "-" : "+";
-    } else if(c.type == CONTROL_TYPE_JOYSTICK_BUTTON) {
-        name = i2s(c.button + 1);
-    } else if(c.type == CONTROL_TYPE_MOUSE_BUTTON) {
-        name = "M" + i2s(c.button);
-    } else if(c.type == CONTROL_TYPE_MOUSE_WHEEL_LEFT) {
-        name = "MWL";
-    } else if(c.type == CONTROL_TYPE_MOUSE_WHEEL_RIGHT) {
-        name = "MWR";
-    }
-    
-    int x1, y1, x2, y2;
-    al_get_text_dimensions(font, name.c_str(), &x1, &y1, &x2, &y2);
-    float total_width =
-        min((float) (x2 - x1 + 4), (max_size.x == 0 ? FLT_MAX : max_size.x));
-    float total_height =
-        min((float) (y2 - y1 + 4), (max_size.y == 0 ? FLT_MAX : max_size.y));
-    total_width = max(total_width, total_height);
-    
-    if(c.type == CONTROL_TYPE_KEYBOARD_KEY) {
-        al_draw_filled_rectangle(
-            where.x - total_width * 0.5, where.y - total_height * 0.5,
-            where.x + total_width * 0.5, where.y + total_height * 0.5,
-            map_alpha(192)
-        );
-        al_draw_rectangle(
-            where.x - total_width * 0.5, where.y - total_height * 0.5,
-            where.x + total_width * 0.5, where.y + total_height * 0.5,
-            al_map_rgba(160, 160, 160, 192), 2
-        );
-    } else {
-        al_draw_filled_rounded_rectangle(
-            where.x - total_width * 0.5, where.y - total_height * 0.5,
-            where.x + total_width * 0.5, where.y + total_height * 0.5,
-            min(16.0, total_width * 0.5),
-            min(16.0, total_height * 0.5),
-            map_alpha(192)
-        );
-        al_draw_rounded_rectangle(
-            where.x - total_width * 0.5, where.y - total_height * 0.5,
-            where.x + total_width * 0.5, where.y + total_height * 0.5,
-            min(16.0, total_width * 0.5),
-            min(16.0, total_height * 0.5),
-            al_map_rgba(160, 160, 160, 192), 2
-        );
-    }
-    draw_compressed_text(
-        font, map_alpha(192), where, ALLEGRO_ALIGN_CENTER, 1,
-        point(
-            (max_size.x == 0 ? 0 : max_size.x - 2),
-            (max_size.y == 0 ? 0 : max_size.y - 2)
-        ), name
-    );
-}
-
-
-/* ----------------------------------------------------------------------------
  * Draws a bitmap.
- * bmp:    The bitmap.
- * center: Center coordinates.
- * size:   Final width and height.
+ * bmp:
+ *   The bitmap.
+ * center:
+ *   Center coordinates.
+ * size:
+ *   Final width and height.
  *   Make this -1 on one of them to keep the aspect ratio from the other.
- * angle:  Angle to rotate the bitmap by.
- * tint:   Tint the bitmap with this color.
+ * angle:
+ *   Angle to rotate the bitmap by.
+ * tint:
+ *   Tint the bitmap with this color.
  */
 void draw_bitmap(
     ALLEGRO_BITMAP* bmp, const point &center,
@@ -1598,7 +1717,7 @@ void draw_bitmap(
     if(size.x == 0 && size.y == 0) return;
     
     if(!bmp) {
-        bmp = bmp_error;
+        bmp = game.bmp_error;
     }
     
     point bmp_size(al_get_bitmap_width(bmp), al_get_bitmap_height(bmp));
@@ -1619,12 +1738,17 @@ void draw_bitmap(
 /* ----------------------------------------------------------------------------
  * Draws a bitmap, but keeps its aspect ratio,
  * and scales it to fit in an imaginary box.
- * bmp:      The bitmap.
- * center:   Center coordinates.
- * box_size: Width and height of the box.
- * angle:    Angle to rotate the bitmap by.
+ * bmp:
+ *   The bitmap.
+ * center:
+ *   Center coordinates.
+ * box_size:
+ *   Width and height of the box.
+ * angle:
+ *   Angle to rotate the bitmap by.
  *   The box does not take angling into account.
- * tint:     Tint the bitmap with this color.
+ * tint:
+ *   Tint the bitmap with this color.
  */
 void draw_bitmap_in_box(
     ALLEGRO_BITMAP* bmp, const point &center,
@@ -1644,48 +1768,35 @@ void draw_bitmap_in_box(
 
 /* ----------------------------------------------------------------------------
  * Draws a bitmap, applying bitmap effects.
- * bmp:      The bitmap.
- * center:   Center coordinates.
- * size:     Final width and height.
- *   Make this -1 on one of them to keep the aspect ratio from the other.
- * angle:    Angle to rotate the bitmap by.
- * effects:  Bitmap effect manager with the effects.
- *   If NULL, no effects are used.
+ * bmp:
+ *   The bitmap.
+ * effects:
+ *   Effects to use.
  */
 void draw_bitmap_with_effects(
-    ALLEGRO_BITMAP* bmp, const point &center,
-    const point &size, const float angle,
-    bitmap_effect_manager* effects
+    ALLEGRO_BITMAP* bmp, const bitmap_effect_info &effects
 ) {
 
     if(!bmp) {
-        bmp = bmp_error;
-    }
-    
-    bitmap_effect_props final_props;
-    if(effects) {
-        final_props = effects->get_final_properties();
+        bmp = game.bmp_error;
     }
     
     point bmp_size(al_get_bitmap_width(bmp), al_get_bitmap_height(bmp));
-    point scale(
-        (size.x / bmp_size.x) * final_props.scale.x,
-        (size.y / bmp_size.y) * final_props.scale.y
-    );
-    point final_pos = center + final_props.translation;
-    float final_angle = angle + final_props.rotation;
+    float scale_x =
+        (effects.scale.x == LARGE_FLOAT) ? effects.scale.y : effects.scale.x;
+    float scale_y =
+        (effects.scale.y == LARGE_FLOAT) ? effects.scale.x : effects.scale.y;
     al_draw_tinted_scaled_rotated_bitmap(
         bmp,
-        final_props.tint_color,
+        effects.tint_color,
         bmp_size.x / 2, bmp_size.y / 2,
-        final_pos.x, final_pos.y,
-        (size.x == -1) ? scale.y : scale.x,
-        (size.y == -1) ? scale.x : scale.y,
-        final_angle,
+        effects.translation.x, effects.translation.y,
+        scale_x, scale_y,
+        effects.rotation,
         0
     );
     
-    if(final_props.glow_color.a > 0) {
+    if(effects.glow_color.a > 0) {
         int old_op, old_src, old_dst, old_aop, old_asrc, old_adst;
         al_get_separate_blender(
             &old_op, &old_src, &old_dst, &old_aop, &old_asrc, &old_adst
@@ -1693,12 +1804,11 @@ void draw_bitmap_with_effects(
         al_set_blender(ALLEGRO_ADD, ALLEGRO_ALPHA, ALLEGRO_ONE);
         al_draw_tinted_scaled_rotated_bitmap(
             bmp,
-            final_props.glow_color,
+            effects.glow_color,
             bmp_size.x / 2, bmp_size.y / 2,
-            final_pos.x, final_pos.y,
-            (size.x == -1) ? scale.y : scale.x,
-            (size.y == -1) ? scale.x : scale.y,
-            final_angle,
+            effects.translation.x, effects.translation.y,
+            scale_x, scale_y,
+            effects.rotation,
             0
         );
         al_set_separate_blender(
@@ -1711,10 +1821,20 @@ void draw_bitmap_with_effects(
 /* ----------------------------------------------------------------------------
  * Draws text on the screen, but compresses (scales) it
  * to fit within the specified range.
- * font - flags: The parameters you'd use for al_draw_text.
- * valign:       Vertical align: 0 = top, 1 = middle, 2 = bottom.
- * max_size:     The maximum width and height. Use <= 0 to have no limit.
- * text:         Text to draw.
+ * font:
+ *   Font to use.
+ * color:
+ *   Tint the text by this color.
+ * where:
+ *   Coordinates to draw it at.
+ * flags:
+ *   Allegro text render function flags.
+ * valign:
+ *   Vertical align: 0 = top, 1 = middle, 2 = bottom.
+ * max_size:
+ *   The maximum width and height. Use <= 0 to have no limit.
+ * text:
+ *   Text to draw.
  */
 void draw_compressed_text(
     const ALLEGRO_FONT* const font, const ALLEGRO_COLOR &color,
@@ -1758,22 +1878,177 @@ void draw_compressed_text(
 
 
 /* ----------------------------------------------------------------------------
+ * Draws a key or button on the screen.
+ * font:
+ *   Font to use for the name.
+ * c:
+ *   Info on the control.
+ * where:
+ *   Center of the place to draw at.
+ * max_size:
+ *   Max width or height. Used to compress it if needed. 0 = unlimited.
+ */
+void draw_control(
+    const ALLEGRO_FONT* const font, const control_info &c,
+    const point &where, const point &max_size
+) {
+
+    if(c.type == CONTROL_TYPE_MOUSE_BUTTON) {
+        //If it's a mouse click, just draw the icon and be done with it.
+        if(c.button >= 1 && c.button <= 3) {
+        
+            draw_bitmap_in_box(
+                game.sys_assets.bmp_mouse_button_icon[c.button - 1],
+                where, max_size
+            );
+            return;
+            
+        }
+    }
+    
+    if(
+        c.type == CONTROL_TYPE_MOUSE_WHEEL_UP ||
+        c.type == CONTROL_TYPE_MOUSE_WHEEL_DOWN
+    ) {
+        //Likewise, if it's a mouse wheel move, just draw the icon and leave.
+        ALLEGRO_BITMAP* b = game.sys_assets.bmp_mouse_wu_icon;
+        if(c.type == CONTROL_TYPE_MOUSE_WHEEL_DOWN) {
+            b = game.sys_assets.bmp_mouse_wd_icon;
+        }
+        
+        draw_bitmap_in_box(b, where, max_size);
+        return;
+    }
+    
+    string name;
+    switch(c.type) {
+    case CONTROL_TYPE_KEYBOARD_KEY: {
+        name = str_to_upper(al_keycode_to_name(c.button));
+        break;
+    } case CONTROL_TYPE_JOYSTICK_AXIS_NEG:
+    case CONTROL_TYPE_JOYSTICK_AXIS_POS: {
+        name = "AXIS " + i2s(c.stick) + " " + i2s(c.axis);
+        name += c.type == CONTROL_TYPE_JOYSTICK_AXIS_NEG ? "-" : "+";
+        break;
+    } case CONTROL_TYPE_JOYSTICK_BUTTON: {
+        name = i2s(c.button + 1);
+        break;
+    } case CONTROL_TYPE_MOUSE_BUTTON: {
+        name = "M" + i2s(c.button);
+        break;
+    } case CONTROL_TYPE_MOUSE_WHEEL_LEFT: {
+        name = "MWL";
+        break;
+    } case CONTROL_TYPE_MOUSE_WHEEL_RIGHT: {
+        name = "MWR";
+        break;
+    }
+    }
+    
+    int x1, y1, x2, y2;
+    al_get_text_dimensions(font, name.c_str(), &x1, &y1, &x2, &y2);
+    float total_width =
+        std::min(
+            (float) (x2 - x1 + 4),
+            (max_size.x == 0 ? FLT_MAX : max_size.x)
+        );
+    float total_height =
+        std::min(
+            (float) (y2 - y1 + 4),
+            (max_size.y == 0 ? FLT_MAX : max_size.y)
+        );
+    total_width = std::max(total_width, total_height);
+    
+    if(c.type == CONTROL_TYPE_KEYBOARD_KEY) {
+        al_draw_filled_rectangle(
+            where.x - total_width * 0.5, where.y - total_height * 0.5,
+            where.x + total_width * 0.5, where.y + total_height * 0.5,
+            map_alpha(192)
+        );
+        al_draw_rectangle(
+            where.x - total_width * 0.5, where.y - total_height * 0.5,
+            where.x + total_width * 0.5, where.y + total_height * 0.5,
+            al_map_rgba(160, 160, 160, 192), 2
+        );
+    } else {
+        al_draw_filled_rounded_rectangle(
+            where.x - total_width * 0.5, where.y - total_height * 0.5,
+            where.x + total_width * 0.5, where.y + total_height * 0.5,
+            std::min(16.0, total_width * 0.5),
+            std::min(16.0, total_height * 0.5),
+            map_alpha(192)
+        );
+        al_draw_rounded_rectangle(
+            where.x - total_width * 0.5, where.y - total_height * 0.5,
+            where.x + total_width * 0.5, where.y + total_height * 0.5,
+            std::min(16.0, total_width * 0.5),
+            std::min(16.0, total_height * 0.5),
+            al_map_rgba(160, 160, 160, 192), 2
+        );
+    }
+    draw_compressed_text(
+        font, map_alpha(192), where, ALLEGRO_ALIGN_CENTER, 1,
+        point(
+            (max_size.x == 0 ? 0 : max_size.x - 2),
+            (max_size.y == 0 ? 0 : max_size.y - 2)
+        ), name
+    );
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Draws a filled diamond shape.
+ * center:
+ *   Center.
+ * radius:
+ *   How far each point of the diamond reaches from the center.
+ * color:
+ *   Color the diamond with this color.
+ */
+void draw_filled_diamond(
+    const point &center, const float radius, const ALLEGRO_COLOR &color
+) {
+    ALLEGRO_VERTEX vert[4];
+    for(unsigned char v = 0; v < 4; ++v) {
+        vert[v].color = color;
+        vert[v].z = 0;
+    }
+    
+    vert[0].x = center.x;
+    vert[0].y = center.y - radius;
+    vert[1].x = center.x + radius;
+    vert[1].y = center.y;
+    vert[2].x = center.x;
+    vert[2].y = center.y + radius;
+    vert[3].x = center.x - radius;
+    vert[3].y = center.y;
+    
+    al_draw_prim(vert, NULL, NULL, 0, 4, ALLEGRO_PRIM_TRIANGLE_FAN);
+}
+
+
+/* ----------------------------------------------------------------------------
  * Draws a strength/weight fraction, in the style of Pikmin 2.
  * The strength is above the weight.
- * center:  Center of the text.
- * current: Current strength.
- * needed:  Needed strength to lift the object (weight).
- * color:   Color of the fraction's text.
+ * center:
+ *   Center of the text.
+ * current:
+ *   Current strength.
+ * needed:
+ *   Needed strength to lift the object (weight).
+ * color:
+ *   Color of the fraction's text.
  */
 void draw_fraction(
-    const point &center, const unsigned int current,
-    const unsigned int needed, const ALLEGRO_COLOR &color
+    const point &center, const size_t current,
+    const size_t needed, const ALLEGRO_COLOR &color
 ) {
-    float first_y = center.y - (font_main_h * 3) / 2;
-    float font_h = al_get_font_line_height(font_value);
+    float first_y =
+        center.y - (al_get_font_line_height(game.fonts.main) * 3) / 2;
+    float font_h = al_get_font_line_height(game.fonts.value);
     
     draw_scaled_text(
-        font_value, color, point(center.x, first_y),
+        game.fonts.value, color, point(center.x, first_y),
         point(
             (current >= needed ? 1.2 : 1.0),
             (current >= needed ? 1.2 : 1.0)
@@ -1782,12 +2057,12 @@ void draw_fraction(
     );
     
     al_draw_text(
-        font_value, color, center.x, first_y + font_h * 0.75,
+        game.fonts.value, color, center.x, first_y + font_h * 0.75,
         ALLEGRO_ALIGN_CENTER, "-"
     );
     
     draw_scaled_text(
-        font_value, color, point(center.x, first_y + font_h * 1.5),
+        game.fonts.value, color, point(center.x, first_y + font_h * 1.5),
         point(
             (needed > current ? 1.2 : 1.0),
             (needed > current ? 1.2 : 1.0)
@@ -1799,13 +2074,18 @@ void draw_fraction(
 
 /* ----------------------------------------------------------------------------
  * Draws a health wheel, with a pieslice that's fuller the more HP is full.
- * center:     Center of the wheel.
- * health:     Current amount of health of the mob
+ * center:
+ *   Center of the wheel.
+ * health:
+ *   Current amount of health of the mob
  *   whose health we're representing.
- * max_health: Maximum amount of health of the mob;
+ * max_health:
+ *   Maximum amount of health of the mob;
  *   health for when it's fully healed.
- * radius:     Radius of the wheel (the whole wheel, not just the pieslice).
- * just_chart: If true, only draw the actual pieslice (pie-chart).
+ * radius:
+ *   Radius of the wheel (the whole wheel, not just the pieslice).
+ * just_chart:
+ *   If true, only draw the actual pieslice (pie-chart).
  *   Used for leader HP on the HUD.
  */
 void draw_health(
@@ -1839,11 +2119,17 @@ void draw_health(
 
 /* ----------------------------------------------------------------------------
  * Draws a liquid sector.
- * where:   X and Y offset.
- * scale:   Scale the sector by this much.
+ * s_ptr:
+ *   Pointer to the sector.
+ * l_ptr:
+ *   Pointer to the liquid.
+ * where:
+ *   X and Y offset.
+ * scale:
+ *   Scale the sector by this much.
  */
 void draw_liquid(
-    sector* s_ptr, const point &where, const float scale
+    sector* s_ptr, liquid* l_ptr, const point &where, const float scale
 ) {
 
     size_t n_vertexes = s_ptr->triangles.size() * 3;
@@ -1853,6 +2139,11 @@ void draw_liquid(
         av[v].z = 0;
     }
     
+    float liquid_opacity_mult = 1.0f;
+    if(s_ptr->draining_liquid) {
+        liquid_opacity_mult = s_ptr->liquid_drain_left / LIQUID_DRAIN_DURATION;
+    }
+    
     //Layer 1 - Transparent wobbling ground texture.
     if(s_ptr->texture_info.bitmap) {
         ALLEGRO_TRANSFORM tra;
@@ -1860,14 +2151,16 @@ void draw_liquid(
             &tra,
             -s_ptr->texture_info.translation.x,
             -s_ptr->texture_info.translation.y,
-            1.0 / s_ptr->texture_info.scale.x,
-            1.0 / s_ptr->texture_info.scale.y,
+            1.0f / s_ptr->texture_info.scale.x,
+            1.0f / s_ptr->texture_info.scale.y,
             -s_ptr->texture_info.rot
         );
         
         float ground_wobble =
-            -sin(area_time_passed * LIQUID_WOBBLE_TIME_SCALE) *
-            LIQUID_WOBBLE_DELTA_X;
+            -sin(
+                game.states.gameplay_st->area_time_passed *
+                LIQUID_WOBBLE_TIME_SCALE
+            ) * LIQUID_WOBBLE_DELTA_X;
         float ground_texture_dy =
             al_get_bitmap_height(s_ptr->texture_info.bitmap) * 0.5;
             
@@ -1886,7 +2179,7 @@ void draw_liquid(
             av[v].color =
                 al_map_rgba(
                     s_ptr->brightness, s_ptr->brightness, s_ptr->brightness,
-                    128
+                    128 * liquid_opacity_mult
                 );
             av[v].x *= scale;
             av[v].y *= scale;
@@ -1899,7 +2192,7 @@ void draw_liquid(
     }
     
     //Layer 2 - Tint.
-    ALLEGRO_COLOR tint_color = s_ptr->associated_liquid->main_color;
+    ALLEGRO_COLOR tint_color = l_ptr->main_color;
     tint_color.r *= s_ptr->brightness / 255.0f;
     tint_color.g *= s_ptr->brightness / 255.0f;
     tint_color.b *= s_ptr->brightness / 255.0f;
@@ -1913,6 +2206,7 @@ void draw_liquid(
         av[v].x = vx - where.x;
         av[v].y = vy - where.y;
         av[v].color = tint_color;
+        av[v].color.a *= liquid_opacity_mult;
         av[v].x *= scale;
         av[v].y *= scale;
     }
@@ -1928,13 +2222,13 @@ void draw_liquid(
         sprite* anim_sprite = NULL;
         float layer_2_dy = 0;
         float layer_speed[2];
-        layer_speed[0] = s_ptr->associated_liquid->surface_speed[0];
-        layer_speed[1] = s_ptr->associated_liquid->surface_speed[1];
-        float alpha = s_ptr->associated_liquid->surface_alpha;
+        layer_speed[0] = l_ptr->surface_speed[0];
+        layer_speed[1] = l_ptr->surface_speed[1];
+        float alpha = l_ptr->surface_alpha * liquid_opacity_mult;
         
-        if(s_ptr->associated_liquid->anim_instance.get_cur_sprite()) {
+        if(l_ptr->anim_instance.get_cur_sprite()) {
             anim_sprite =
-                s_ptr->associated_liquid->anim_instance.get_cur_sprite();
+                l_ptr->anim_instance.get_cur_sprite();
             if(anim_sprite->bitmap) {
                 layer_2_dy =
                     (anim_sprite->file_size.y * 0.5) * anim_sprite->scale.x;
@@ -1950,7 +2244,9 @@ void draw_liquid(
             
             av[v].x = vx - where.x;
             av[v].y = vy - where.y;
-            av[v].u = vx + (area_time_passed * layer_speed[l]);
+            av[v].u =
+                vx +
+                (game.states.gameplay_st->area_time_passed * layer_speed[l]);
             av[v].v = vy + (layer_2_dy * l);
             av[v].color =
                 al_map_rgba(
@@ -1978,9 +2274,12 @@ void draw_liquid(
 
 /* ----------------------------------------------------------------------------
  * Draws the loading screen for an area (or anything else, really).
- * text:    The main text to show, optional.
- * subtext: Subtext to show under the main text, optional.
- * opacity: 0 to 1. The background blackness lowers in opacity much faster.
+ * text:
+ *   The main text to show, optional.
+ * subtext:
+ *   Subtext to show under the main text, optional.
+ * opacity:
+ *   0 to 1. The background blackness lowers in opacity much faster.
  */
 void draw_loading_screen(
     const string &text, const string &subtext, const float opacity
@@ -1989,9 +2288,9 @@ void draw_loading_screen(
     const float LOADING_SCREEN_SUBTITLE_SCALE = 0.6f;
     const int LOADING_SCREEN_PADDING = 64;
     
-    unsigned char blackness_alpha = 255.0f * max(0.0f, opacity * 4 - 3);
+    unsigned char blackness_alpha = 255.0f * std::max(0.0f, opacity * 4 - 3);
     al_draw_filled_rectangle(
-        0, 0, scr_w, scr_h, al_map_rgba(0, 0, 0, blackness_alpha)
+        0, 0, game.win_w, game.win_h, al_map_rgba(0, 0, 0, blackness_alpha)
     );
     
     int old_op, old_src, old_dst, old_aop, old_asrc, old_adst;
@@ -2003,27 +2302,30 @@ void draw_loading_screen(
     //Set up the bitmap that will hold the text.
     int text_w = 0, text_h = 0;
     if(!text.empty()) {
-        if(!loading_text_bmp) {
+        if(!game.loading_text_bmp) {
             //No main text buffer? Create it!
             
             get_multiline_text_dimensions(
-                font_area_name, text, &text_w, &text_h
+                game.fonts.area_name, text, &text_w, &text_h
             );
-            loading_text_bmp = al_create_bitmap(text_w, text_h);
-            
+            game.loading_text_bmp =
+                al_create_bitmap(text_w, text_h);
+                
             //Draw the main text on its bitmap.
-            al_set_target_bitmap(loading_text_bmp); {
+            al_set_target_bitmap(game.loading_text_bmp); {
                 al_clear_to_color(al_map_rgba(0, 0, 0, 0));
                 draw_text_lines(
-                    font_area_name, al_map_rgb(255, 215, 0),
+                    game.fonts.area_name, al_map_rgb(255, 215, 0),
                     point(), ALLEGRO_ALIGN_LEFT, 0,
                     text
                 );
-            } al_set_target_backbuffer(display);
+            } al_set_target_backbuffer(game.display);
             
         } else {
-            text_w = al_get_bitmap_width(loading_text_bmp);
-            text_h = al_get_bitmap_height(loading_text_bmp);
+            text_w =
+                al_get_bitmap_width(game.loading_text_bmp);
+            text_h =
+                al_get_bitmap_height(game.loading_text_bmp);
         }
         
     }
@@ -2031,30 +2333,32 @@ void draw_loading_screen(
     int subtext_w = 0, subtext_h = 0;
     if(!subtext.empty()) {
     
-        if(!loading_subtext_bmp) {
+        if(!game.loading_subtext_bmp) {
             //No subtext buffer? Create it!
             get_multiline_text_dimensions(
-                font_area_name, subtext, &subtext_w, &subtext_h
+                game.fonts.area_name, subtext, &subtext_w, &subtext_h
             );
-            loading_subtext_bmp = al_create_bitmap(subtext_w, subtext_h);
-            
-            al_set_target_bitmap(loading_subtext_bmp); {
+            game.loading_subtext_bmp =
+                al_create_bitmap(subtext_w, subtext_h);
+                
+            al_set_target_bitmap(game.loading_subtext_bmp); {
                 al_clear_to_color(al_map_rgba(0, 0, 0, 0));
                 draw_text_lines(
-                    font_area_name, al_map_rgb(224, 224, 224),
+                    game.fonts.area_name, al_map_rgb(224, 224, 224),
                     point(),
                     ALLEGRO_ALIGN_LEFT, 0,
                     subtext
                 );
                 
-            } al_set_target_backbuffer(display);
+            } al_set_target_backbuffer(game.display);
             
             //We'll be scaling this, so let's update the mipmap.
-            loading_subtext_bmp = recreate_bitmap(loading_subtext_bmp);
-            
+            game.loading_subtext_bmp =
+                recreate_bitmap(game.loading_subtext_bmp);
+                
         } else {
-            subtext_w = al_get_bitmap_width(loading_subtext_bmp);
-            subtext_h = al_get_bitmap_height(loading_subtext_bmp);
+            subtext_w = al_get_bitmap_width(game.loading_subtext_bmp);
+            subtext_h = al_get_bitmap_height(game.loading_subtext_bmp);
         }
         
     }
@@ -2069,23 +2373,25 @@ void draw_loading_screen(
     
         text_y =
             subtext.empty() ?
-            (scr_h * 0.5 - text_h * 0.5) :
-            (scr_h * 0.5 - LOADING_SCREEN_PADDING * 0.5 - text_h);
+            (game.win_h * 0.5 - text_h * 0.5) :
+            (game.win_h * 0.5 - LOADING_SCREEN_PADDING * 0.5 - text_h);
         al_draw_tinted_bitmap(
-            loading_text_bmp, al_map_rgba(255, 255, 255, 255.0 * opacity),
-            scr_w * 0.5 - text_w * 0.5, text_y, 0
+            game.loading_text_bmp, al_map_rgba(255, 255, 255, 255.0 * opacity),
+            game.win_w * 0.5 - text_w * 0.5, text_y, 0
         );
         
     }
     
     //Draw the subtext bitmap in its place.
-    float subtext_y = scr_h * 0.5 + LOADING_SCREEN_PADDING * 0.5;
+    float subtext_y = game.win_h * 0.5 + LOADING_SCREEN_PADDING * 0.5;
     if(!subtext.empty()) {
     
         al_draw_tinted_scaled_bitmap(
-            loading_subtext_bmp, al_map_rgba(255, 255, 255, 255.0 * opacity),
+            game.loading_subtext_bmp,
+            al_map_rgba(255, 255, 255, 255.0 * opacity),
             0, 0, subtext_w, subtext_h,
-            scr_w * 0.5 - (subtext_w * LOADING_SCREEN_SUBTITLE_SCALE * 0.5),
+            game.win_w * 0.5 -
+            (subtext_w * LOADING_SCREEN_SUBTITLE_SCALE * 0.5),
             subtext_y,
             subtext_w * LOADING_SCREEN_SUBTITLE_SCALE,
             subtext_h * LOADING_SCREEN_SUBTITLE_SCALE,
@@ -2101,30 +2407,30 @@ void draw_loading_screen(
     
         ALLEGRO_VERTEX text_vertexes[4];
         float text_reflection_h =
-            min((int) (LOADING_SCREEN_PADDING * 0.5), text_h);
+            std::min((int) (LOADING_SCREEN_PADDING * 0.5), text_h);
         //Top-left vertex.
-        text_vertexes[0].x = scr_w * 0.5 - text_w * 0.5;
+        text_vertexes[0].x = game.win_w * 0.5 - text_w * 0.5;
         text_vertexes[0].y = text_y + text_h;
         text_vertexes[0].z = 0;
         text_vertexes[0].u = 0;
         text_vertexes[0].v = text_h;
         text_vertexes[0].color = al_map_rgba(255, 255, 255, reflection_alpha);
         //Top-right vertex.
-        text_vertexes[1].x = scr_w * 0.5 + text_w * 0.5;
+        text_vertexes[1].x = game.win_w * 0.5 + text_w * 0.5;
         text_vertexes[1].y = text_y + text_h;
         text_vertexes[1].z = 0;
         text_vertexes[1].u = text_w;
         text_vertexes[1].v = text_h;
         text_vertexes[1].color = al_map_rgba(255, 255, 255, reflection_alpha);
         //Bottom-right vertex.
-        text_vertexes[2].x = scr_w * 0.5 + text_w * 0.5;
+        text_vertexes[2].x = game.win_w * 0.5 + text_w * 0.5;
         text_vertexes[2].y = text_y + text_h + text_reflection_h;
         text_vertexes[2].z = 0;
         text_vertexes[2].u = text_w;
         text_vertexes[2].v = text_h - text_reflection_h;
         text_vertexes[2].color = al_map_rgba(255, 255, 255, 0);
         //Bottom-left vertex.
-        text_vertexes[3].x = scr_w * 0.5 - text_w * 0.5;
+        text_vertexes[3].x = game.win_w * 0.5 - text_w * 0.5;
         text_vertexes[3].y = text_y + text_h + text_reflection_h;
         text_vertexes[3].z = 0;
         text_vertexes[3].u = 0;
@@ -2132,7 +2438,7 @@ void draw_loading_screen(
         text_vertexes[3].color = al_map_rgba(255, 255, 255, 0);
         
         al_draw_prim(
-            text_vertexes, NULL, loading_text_bmp,
+            text_vertexes, NULL, game.loading_text_bmp,
             0, 4, ALLEGRO_PRIM_TRIANGLE_FAN
         );
         
@@ -2143,13 +2449,13 @@ void draw_loading_screen(
     
         ALLEGRO_VERTEX subtext_vertexes[4];
         float subtext_reflection_h =
-            min(
+            std::min(
                 (int) (LOADING_SCREEN_PADDING * 0.5),
                 (int) (text_h * LOADING_SCREEN_SUBTITLE_SCALE)
             );
         //Top-left vertex.
         subtext_vertexes[0].x =
-            scr_w * 0.5 - subtext_w * LOADING_SCREEN_SUBTITLE_SCALE * 0.5;
+            game.win_w * 0.5 - subtext_w * LOADING_SCREEN_SUBTITLE_SCALE * 0.5;
         subtext_vertexes[0].y =
             subtext_y + subtext_h * LOADING_SCREEN_SUBTITLE_SCALE;
         subtext_vertexes[0].z = 0;
@@ -2159,7 +2465,7 @@ void draw_loading_screen(
             al_map_rgba(255, 255, 255, reflection_alpha);
         //Top-right vertex.
         subtext_vertexes[1].x =
-            scr_w * 0.5 + subtext_w * LOADING_SCREEN_SUBTITLE_SCALE * 0.5;
+            game.win_w * 0.5 + subtext_w * LOADING_SCREEN_SUBTITLE_SCALE * 0.5;
         subtext_vertexes[1].y =
             subtext_y + subtext_h * LOADING_SCREEN_SUBTITLE_SCALE;
         subtext_vertexes[1].z = 0;
@@ -2169,7 +2475,7 @@ void draw_loading_screen(
             al_map_rgba(255, 255, 255, reflection_alpha);
         //Bottom-right vertex.
         subtext_vertexes[2].x =
-            scr_w * 0.5 + subtext_w * LOADING_SCREEN_SUBTITLE_SCALE * 0.5;
+            game.win_w * 0.5 + subtext_w * LOADING_SCREEN_SUBTITLE_SCALE * 0.5;
         subtext_vertexes[2].y =
             subtext_y + subtext_h * LOADING_SCREEN_SUBTITLE_SCALE +
             subtext_reflection_h;
@@ -2179,7 +2485,7 @@ void draw_loading_screen(
         subtext_vertexes[2].color = al_map_rgba(255, 255, 255, 0);
         //Bottom-left vertex.
         subtext_vertexes[3].x =
-            scr_w * 0.5 - subtext_w * LOADING_SCREEN_SUBTITLE_SCALE * 0.5;
+            game.win_w * 0.5 - subtext_w * LOADING_SCREEN_SUBTITLE_SCALE * 0.5;
         subtext_vertexes[3].y =
             subtext_y + subtext_h * LOADING_SCREEN_SUBTITLE_SCALE +
             subtext_reflection_h;
@@ -2189,7 +2495,7 @@ void draw_loading_screen(
         subtext_vertexes[3].color = al_map_rgba(255, 255, 255, 0);
         
         al_draw_prim(
-            subtext_vertexes, NULL, loading_subtext_bmp,
+            subtext_vertexes, NULL, game.loading_subtext_bmp,
             0, 4, ALLEGRO_PRIM_TRIANGLE_FAN
         );
         
@@ -2198,23 +2504,27 @@ void draw_loading_screen(
     //Draw the game's logo to the left of the "Loading..." text.
     if(opacity == 1.0f) {
         point icon_pos(
-            scr_w - 8 - al_get_text_width(font_main, "Loading...") -
-            8 - font_main_h * 0.5,
-            scr_h - 8 - font_main_h * 0.5
+            game.win_w - 8 - al_get_text_width(game.fonts.main, "Loading...") -
+            8 - al_get_font_line_height(game.fonts.main) * 0.5,
+            game.win_h - 8 - al_get_font_line_height(game.fonts.main) * 0.5
         );
         
-        if(bmp_icon && bmp_icon != bmp_error) {
+        if(
+            game.sys_assets.bmp_icon &&
+            game.sys_assets.bmp_icon != game.bmp_error
+        ) {
             draw_bitmap(
-                bmp_icon, icon_pos, point(-1, font_main_h),
+                game.sys_assets.bmp_icon, icon_pos,
+                point(-1, al_get_font_line_height(game.fonts.main)),
                 0, al_map_rgba(255, 255, 255, opacity * 255.0)
             );
         }
         
         //Draw the "Loading..." text, if we're not fading.
         al_draw_text(
-            font_main, al_map_rgb(192, 192, 192),
-            scr_w - 8,
-            scr_h - 8 - font_main_h,
+            game.fonts.main, al_map_rgb(192, 192, 192),
+            game.win_w - 8,
+            game.win_h - 8 - al_get_font_line_height(game.fonts.main),
             ALLEGRO_ALIGN_RIGHT, "Loading..."
         );
     }
@@ -2223,11 +2533,58 @@ void draw_loading_screen(
 
 
 /* ----------------------------------------------------------------------------
+ * Draws a mob's shadow.
+ * center:
+ *   Center of the mob.
+ * diameter:
+ *   Diameter of the mob.
+ * delta_z:
+ *   The mob is these many units above the floor directly below it.
+ * shadow_stretch:
+ *   How much to stretch the shadow by
+ *   (used to simulate sun shadow direction casting).
+ */
+void draw_mob_shadow(
+    const point &center, const float diameter,
+    const float delta_z, const float shadow_stretch
+) {
+
+    if(shadow_stretch <= 0) return;
+    
+    float shadow_x = 0;
+    float shadow_w =
+        diameter + (diameter * shadow_stretch * MOB_SHADOW_STRETCH_MULT);
+        
+    if(game.states.gameplay_st->day_minutes < 60 * 12) {
+        //Shadows point to the West.
+        shadow_x = -shadow_w + diameter * 0.5;
+        shadow_x -= shadow_stretch * delta_z * MOB_SHADOW_Y_MULT;
+    } else {
+        //Shadows point to the East.
+        shadow_x = -(diameter * 0.5);
+        shadow_x += shadow_stretch * delta_z * MOB_SHADOW_Y_MULT;
+    }
+    
+    
+    draw_bitmap(
+        game.sys_assets.bmp_shadow,
+        point(center.x + shadow_x + shadow_w / 2, center.y),
+        point(shadow_w, diameter),
+        0,
+        map_alpha(255 * (1 - shadow_stretch))
+    );
+}
+
+
+/* ----------------------------------------------------------------------------
  * Draws a notification, like a note saying that the player can press
  * a certain button to pluck.
- * target:  Spot that the notification is pointing at.
- * text:    Text to say.
- * control: If not NULL, draw the control's button/key/etc. before the text.
+ * target:
+ *   Spot that the notification is pointing at.
+ * text:
+ *   Text to say.
+ * control:
+ *   If not NULL, draw the control's button/key/etc. before the text.
  */
 void draw_notification(
     const point &target, const string &text, control_info* control
@@ -2235,14 +2592,16 @@ void draw_notification(
 
     ALLEGRO_TRANSFORM tra, old;
     al_identity_transform(&tra);
-    al_translate_transform(&tra, target.x * cam_zoom, target.y * cam_zoom);
-    al_scale_transform(&tra, 1.0 / cam_zoom, 1.0 / cam_zoom);
+    al_translate_transform(
+        &tra, target.x * game.cam.zoom, target.y * game.cam.zoom
+    );
+    al_scale_transform(&tra, 1.0f / game.cam.zoom, 1.0f / game.cam.zoom);
     al_copy_transform(&old, al_get_current_transform());
     al_compose_transform(&tra, &old);
     al_use_transform(&tra);
     
-    int bmp_w = al_get_bitmap_width(bmp_notification);
-    int bmp_h = al_get_bitmap_height(bmp_notification);
+    int bmp_w = al_get_bitmap_width(game.sys_assets.bmp_notification);
+    int bmp_h = al_get_bitmap_height(game.sys_assets.bmp_notification);
     
     float text_box_x1 = -bmp_w * 0.5 + NOTIFICATION_PADDING;
     float text_box_x2 = bmp_w * 0.5 - NOTIFICATION_PADDING;
@@ -2250,7 +2609,7 @@ void draw_notification(
     float text_box_y2 = NOTIFICATION_PADDING;
     
     draw_bitmap(
-        bmp_notification,
+        game.sys_assets.bmp_notification,
         point(0, -bmp_h * 0.5),
         point(bmp_w, bmp_h),
         0,
@@ -2260,7 +2619,7 @@ void draw_notification(
     if(control) {
         text_box_x1 += NOTIFICATION_CONTROL_SIZE + NOTIFICATION_PADDING;
         draw_control(
-            font_main, *control,
+            game.fonts.main, *control,
             point(
                 -bmp_w * 0.5 + NOTIFICATION_PADDING +
                 NOTIFICATION_CONTROL_SIZE * 0.5,
@@ -2274,7 +2633,7 @@ void draw_notification(
     }
     
     draw_compressed_text(
-        font_main, map_alpha(NOTIFICATION_ALPHA),
+        game.fonts.main, map_alpha(NOTIFICATION_ALPHA),
         point(
             (text_box_x1 + text_box_x2) * 0.5,
             (text_box_y1 + text_box_y2) * 0.5
@@ -2294,11 +2653,16 @@ void draw_notification(
 
 /* ----------------------------------------------------------------------------
  * Draws a rotated rectangle.
- * center:     Center of the rectangle.
- * dimensions: Width and height of the rectangle.
- * angle:      Angle the rectangle is facing.
- * color:      Color to use.
- * thickness:  Thickness to use.
+ * center:
+ *   Center of the rectangle.
+ * dimensions:
+ *   Width and height of the rectangle.
+ * angle:
+ *   Angle the rectangle is facing.
+ * color:
+ *   Color to use.
+ * thickness:
+ *   Thickness to use.
  */
 void draw_rotated_rectangle(
     const point &center, const point &dimensions,
@@ -2322,54 +2686,21 @@ void draw_rotated_rectangle(
 
 
 /* ----------------------------------------------------------------------------
- * Draws a mob's shadow.
- * center:         Center of the mob.
- * diameter:       Diameter of the mob.
- * delta_z:        The mob is these many units above the floor
- *   directly below it.
- * shadow_stretch: How much to stretch the shadow by
- *   (used to simulate sun shadow direction casting).
- */
-void draw_mob_shadow(
-    const point &center, const float diameter,
-    const float delta_z, const float shadow_stretch
-) {
-
-    if(shadow_stretch <= 0) return;
-    
-    float shadow_x = 0;
-    float shadow_w =
-        diameter + (diameter * shadow_stretch * MOB_SHADOW_STRETCH_MULT);
-        
-    if(day_minutes < 60 * 12) {
-        //Shadows point to the West.
-        shadow_x = -shadow_w + diameter * 0.5;
-        shadow_x -= shadow_stretch * delta_z * MOB_SHADOW_Y_MULT;
-    } else {
-        //Shadows point to the East.
-        shadow_x = -(diameter * 0.5);
-        shadow_x += shadow_stretch * delta_z * MOB_SHADOW_Y_MULT;
-    }
-    
-    
-    draw_bitmap(
-        bmp_shadow,
-        point(center.x + shadow_x + shadow_w / 2, center.y),
-        point(shadow_w, diameter),
-        0,
-        map_alpha(255 * (1 - shadow_stretch))
-    );
-}
-
-
-/* ----------------------------------------------------------------------------
- * Draws text, scaled
- * font - color: The parameters you'd use for al_draw_text.
- * where:        Coordinates to draw in.
- * scale:        Horizontal or vertical scale.
- * flags:        Same flags you'd use for al_draw_text.
- * valign:       Vertical align. 0: top, 1: center, 2: bottom.
- * text:         Text to draw.
+ * Draws text, scaled.
+ * font:
+ *   Font to use.
+ * color:
+ *   Tint the text with this color.
+ * where:
+ *   Coordinates to draw in.
+ * scale:
+ *   Horizontal or vertical scale.
+ * flags:
+ *   Same flags you'd use for al_draw_text.
+ * valign:
+ *   Vertical align. 0: top, 1: center, 2: bottom.
+ * text:
+ *   Text to draw.
  */
 void draw_scaled_text(
     const ALLEGRO_FONT* const font, const ALLEGRO_COLOR &color,
@@ -2392,9 +2723,12 @@ void draw_scaled_text(
 
 /* ----------------------------------------------------------------------------
  * Draws the wall shadows that are being cast on top of this sector.
- * s:        The sector to draw.
- * where:    Top-left coordinates.
- * scale:    Drawing scale.
+ * s_ptr:
+ *   The sector to draw.
+ * where:
+ *   Top-left coordinates.
+ * scale:
+ *   Drawing scale.
  */
 void draw_sector_shadows(sector* s_ptr, const point &where, const float scale) {
     if(s_ptr->is_bottomless_pit) return;
@@ -2403,9 +2737,8 @@ void draw_sector_shadows(sector* s_ptr, const point &where, const float scale) {
         edge* e_ptr = s_ptr->edges[e];
         ALLEGRO_VERTEX av[4];
         
-        sector* other_sector =
-            e_ptr->sectors[(e_ptr->sectors[0] == s_ptr ? 1 : 0)];
-            
+        sector* other_sector = e_ptr->get_other_sector(s_ptr);
+        
         if(!casts_shadow(other_sector, s_ptr)) continue;
         
         float shadow_length =
@@ -2505,17 +2838,16 @@ void draw_sector_shadows(sector* s_ptr, const point &where, const float scale) {
                     neighbor_angle_difs[v] = d;
                     got_first[v] = true;
                     
-                    sector* other_sector =
-                        ve_ptr->sectors[(ve_ptr->sectors[0] == s_ptr ? 1 : 0)];
+                    sector* edge_other_sec = ve_ptr->get_other_sector(s_ptr);
                     neighbor_shadow[v] =
-                        casts_shadow(other_sector, s_ptr);
+                        casts_shadow(edge_other_sec, s_ptr);
                         
                     //Get the shadow length.
                     //Defaulting to the current sector's length
                     //makes it easier to calculate things later on.
                     neighbor_shadow_length[v] =
                         neighbor_shadow[v] ?
-                        get_wall_shadow_length(other_sector->z - s_ptr->z) :
+                        get_wall_shadow_length(edge_other_sec->z - s_ptr->z) :
                         shadow_length;
                 }
             }
@@ -2531,7 +2863,9 @@ void draw_sector_shadows(sector* s_ptr, const point &where, const float scale) {
         
         point shadow_point[2];
         ALLEGRO_VERTEX extra_av[8];
-        for(unsigned char e = 0; e < 8; ++e) { extra_av[e].z = 0;}
+        for(unsigned char eav = 0; eav < 8; ++eav) {
+            extra_av[eav].z = 0;
+        }
         //How many vertexes of the extra polygon to draw.
         unsigned char draw_extra[2] = {0, 0};
         
@@ -2702,10 +3036,14 @@ void draw_sector_shadows(sector* s_ptr, const point &where, const float scale) {
 
 /* ----------------------------------------------------------------------------
  * Draws a sector, but only the texture (no wall shadows).
- * s_ptr:   Pointer to the sector.
- * where:   X and Y offset.
- * scale:   Scale the sector by this much.
- * opacity: Draw the textures at this opacity, 0 - 1.
+ * s_ptr:
+ *   Pointer to the sector.
+ * where:
+ *   X and Y offset.
+ * scale:
+ *   Scale the sector by this much.
+ * opacity:
+ *   Draw the textures at this opacity, 0 - 1.
  */
 void draw_sector_texture(
     sector* s_ptr, const point &where, const float scale, const float opacity
@@ -2764,8 +3102,8 @@ void draw_sector_texture(
                 &tra,
                 -texture_info_to_use->translation.x,
                 -texture_info_to_use->translation.y,
-                1.0 / texture_info_to_use->scale.x,
-                1.0 / texture_info_to_use->scale.y,
+                1.0f / texture_info_to_use->scale.x,
+                1.0f / texture_info_to_use->scale.y,
                 -texture_info_to_use->rot
             );
         }
@@ -2851,18 +3189,22 @@ void draw_sector_texture(
 
 /* ----------------------------------------------------------------------------
  * Draws a status effect's bitmap.
+ * m:
+ *   Mob that has this status effect.
+ * effects:
+ *   List of bitmap effects to use.
  */
-void draw_status_effect_bmp(mob* m, bitmap_effect_manager* effects) {
+void draw_status_effect_bmp(mob* m, bitmap_effect_info &effects) {
     float status_bmp_scale;
     ALLEGRO_BITMAP* status_bmp = m->get_status_bitmap(&status_bmp_scale);
-    if(status_bmp) {
-        draw_bitmap_with_effects(
-            status_bmp,
-            m->pos,
-            point(m->type->radius * 2 * status_bmp_scale, -1),
-            0, effects
-        );
-    }
+    
+    if(!status_bmp) return;
+    
+    draw_bitmap(
+        status_bmp,
+        m->pos,
+        point(m->type->radius * 2 * status_bmp_scale, -1)
+    );
 }
 
 
@@ -2870,12 +3212,18 @@ void draw_status_effect_bmp(mob* m, bitmap_effect_manager* effects) {
  * Draws text, but if there are line breaks,
  * it'll draw every line one under the other.
  * It basically calls Allegro's text drawing functions, but for each line.
- * font:   Font to use.
- * color:  Color.
- * where:  Coordinates of the text.
- * flags:  Flags, just like the ones you'd pass to al_draw_text.
- * valign: Vertical align: 0 for top, 1 for center, 2 for bottom.
- * text:   Text to write, line breaks included ('\n').
+ * font:
+ *   Font to use.
+ * color:
+ *   Color.
+ * where:
+ *   Coordinates of the text.
+ * flags:
+ *   Flags, just like the ones you'd pass to al_draw_text.
+ * valign:
+ *   Vertical align: 0 for top, 1 for center, 2 for bottom.
+ * text:
+ *   Text to write, line breaks included ('\n').
  */
 void draw_text_lines(
     const ALLEGRO_FONT* const font, const ALLEGRO_COLOR &color,
@@ -2909,8 +3257,10 @@ void draw_text_lines(
 /* ----------------------------------------------------------------------------
  * Eases a number [0, 1] in accordance to a non-linear interpolation
  * method. Normally used for camera movement and such.
- * method: the method to use. Use EASE_*.
- * n:      the number to ease, in the range [0, 1].
+ * method:
+ *   The method to use. Use EASE_*.
+ * n:
+ *   The number to ease, in the range [0, 1].
  */
 float ease(const unsigned char method, const float n) {
     switch(method) {

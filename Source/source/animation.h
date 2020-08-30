@@ -18,10 +18,13 @@
 #include <allegro5/allegro_image.h>
 
 #include "const.h"
-#include "data_file.h"
 #include "hitbox.h"
+#include "utils/data_file.h"
 
-using namespace std;
+
+using std::size_t;
+using std::string;
+using std::vector;
 
 class animation_database;
 
@@ -32,7 +35,7 @@ class animation_database;
  *
  * A hitbox (hitbox.h) is defined by a body part,
  * a type of hitbox (can be hurt, or hurts other mobs),
- * and some other parameters, like position.
+ * and some other properties, like position.
  *
  * A frame in an animation is defined by a sprite
  * in a spritesheet, as well as its duration.
@@ -98,6 +101,7 @@ public:
         const point &b_size, const vector<hitbox> &h
     );
     sprite(const sprite &s2);
+    sprite &operator=(const sprite &s2);
     void create_hitboxes(
         animation_database* const adb,
         const float height = 0, const float radius = 0
@@ -152,6 +156,7 @@ public:
         const size_t loop_frame = 0, const unsigned char hit_rate = 100
     );
     animation(const animation &a2);
+    animation &operator=(const animation &a2);
 };
 
 
@@ -173,11 +178,13 @@ public:
         const vector<body_part*> &b = vector<body_part*>()
     );
     
-    size_t find_animation(const string &name);
-    size_t find_sprite(   const string &name);
-    size_t find_body_part(const string &name);
+    size_t find_animation(const string &name) const;
+    size_t find_sprite(   const string &name) const;
+    size_t find_body_part(const string &name) const;
     
-    void create_conversions(vector<pair<size_t, string> > conversions);
+    void create_conversions(
+        vector<std::pair<size_t, string> > conversions, data_node* file
+    );
     void fix_body_part_pointers();
     void sort_alphabetically();
     
@@ -198,12 +205,12 @@ public:
     
     animation_instance(animation_database* anim_db = NULL);
     animation_instance(const animation_instance &ai2);
+    animation_instance &operator=(const animation_instance &ai2);
     
-    void set_anim(animation* new_anim, const size_t new_anim_nr);
     void start();
     void skip_ahead_randomly();
     bool tick(const float time, vector<size_t>* signals = NULL);
-    sprite* get_cur_sprite();
+    sprite* get_cur_sprite() const;
 };
 
 

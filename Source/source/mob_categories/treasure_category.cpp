@@ -12,8 +12,8 @@
 
 #include "treasure_category.h"
 
+#include "../game.h"
 #include "../mobs/treasure.h"
-#include "../vars.h"
 
 
 /* ----------------------------------------------------------------------------
@@ -22,29 +22,38 @@
 treasure_category::treasure_category() :
     mob_category(
         MOB_CATEGORY_TREASURES, "Treasure", "Treasures",
-        TREASURES_FOLDER_PATH, al_map_rgb(255, 240, 128)
+        "Treasures", al_map_rgb(204, 151, 71)
     ) {
     
 }
 
 
 /* ----------------------------------------------------------------------------
- * Returns all types of treasure by name.
+ * Clears the list of registered types of treasure.
  */
-void treasure_category::get_type_names(vector<string> &list) {
-    for(auto t = treasure_types.begin(); t != treasure_types.end(); ++t) {
-        list.push_back(t->first);
+void treasure_category::clear_types() {
+    for(auto &t : game.mob_types.treasure) {
+        delete t.second;
     }
+    game.mob_types.treasure.clear();
 }
 
 
 /* ----------------------------------------------------------------------------
- * Returns a type of treasure given its name, or NULL on error.
+ * Creates a treasure and adds it to the list of treasures.
+ * pos:
+ *   Starting coordinates.
+ * type:
+ *   Mob type.
+ * angle:
+ *   Starting angle.
  */
-mob_type* treasure_category::get_type(const string &name) {
-    auto it = treasure_types.find(name);
-    if(it == treasure_types.end()) return NULL;
-    return it->second;
+mob* treasure_category::create_mob(
+    const point &pos, mob_type* type, const float angle
+) {
+    treasure* m = new treasure(pos, (treasure_type*) type, angle);
+    game.states.gameplay_st->mobs.treasures.push_back(m);
+    return m;
 }
 
 
@@ -57,44 +66,50 @@ mob_type* treasure_category::create_type() {
 
 
 /* ----------------------------------------------------------------------------
- * Registers a created type of treasure.
- */
-void treasure_category::register_type(mob_type* type) {
-    treasure_types[type->name] = (treasure_type*) type;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Creates a treasure and adds it to the list of treasures.
- */
-mob* treasure_category::create_mob(
-    const point &pos, mob_type* type, const float angle
-) {
-    treasure* m = new treasure(pos, (treasure_type*) type, angle);
-    treasures.push_back(m);
-    return m;
-}
-
-
-/* ----------------------------------------------------------------------------
  * Clears a treasure from the list of treasures.
+ * m:
+ *   The mob to erase.
  */
 void treasure_category::erase_mob(mob* m) {
-    treasures.erase(
-        find(treasures.begin(), treasures.end(), (treasure*) m)
+    game.states.gameplay_st->mobs.treasures.erase(
+        find(
+            game.states.gameplay_st->mobs.treasures.begin(),
+            game.states.gameplay_st->mobs.treasures.end(),
+            (treasure*) m
+        )
     );
 }
 
 
 /* ----------------------------------------------------------------------------
- * Clears the list of registered types of treasure.
+ * Returns a type of treasure given its name, or NULL on error.
+ * name:
+ *   Name of the mob type to get.
  */
-void treasure_category::clear_types() {
-    for(auto t = treasure_types.begin(); t != treasure_types.end(); ++t) {
-        delete t->second;
-    }
-    treasure_types.clear();
+mob_type* treasure_category::get_type(const string &name) const {
+    auto it = game.mob_types.treasure.find(name);
+    if(it == game.mob_types.treasure.end()) return NULL;
+    return it->second;
 }
 
 
-treasure_category::~treasure_category() { }
+/* ----------------------------------------------------------------------------
+ * Returns all types of treasure by name.
+ * list:
+ *   This list gets filled with the mob type names.
+ */
+void treasure_category::get_type_names(vector<string> &list) const {
+    for(auto &t : game.mob_types.treasure) {
+        list.push_back(t.first);
+    }
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Registers a created type of treasure.
+ * type:
+ *   Mob type to register.
+ */
+void treasure_category::register_type(mob_type* type) {
+    game.mob_types.treasure[type->name] = (treasure_type*) type;
+}

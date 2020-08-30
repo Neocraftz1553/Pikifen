@@ -14,23 +14,29 @@
 
 #include "../const.h"
 #include "../functions.h"
+#include "../game.h"
 #include "../mobs/pile.h"
+#include "../mobs/resource.h"
 #include "../utils/string_utils.h"
 #include "gen_mob_fsm.h"
 
-using namespace std;
+
+using std::size_t;
+
 
 /* ----------------------------------------------------------------------------
  * Creates the finite state machine for the pile's logic.
+ * typ:
+ *   Mob type to create the finite state machine for.
  */
 void pile_fsm::create_fsm(mob_type* typ) {
     easy_fsm_creator efc;
     
     efc.new_state("idling", PILE_STATE_IDLING); {
-        efc.new_event(MOB_EVENT_ON_ENTER); {
+        efc.new_event(MOB_EV_ON_ENTER); {
             efc.run(pile_fsm::become_idle);
         }
-        efc.new_event(MOB_EVENT_HITBOX_TOUCH_N_A); {
+        efc.new_event(MOB_EV_HITBOX_TOUCH_N_A); {
             efc.run(pile_fsm::be_attacked);
         }
     }
@@ -50,6 +56,12 @@ void pile_fsm::create_fsm(mob_type* typ) {
 
 /* ----------------------------------------------------------------------------
  * Handles being attacked, and checks if it must drop another resource or not.
+ * m:
+ *   The mob.
+ * info1:
+ *   Unused.
+ * info2:
+ *   Unused.
  */
 void pile_fsm::be_attacked(mob* m, void* info1, void* info2) {
     gen_mob_fsm::be_attacked(m, info1, info2);
@@ -61,7 +73,7 @@ void pile_fsm::be_attacked(mob* m, void* info1, void* info2) {
     int intended_amount =
         ceil(p_ptr->health / p_ptr->pil_type->health_per_resource);
     int amount_to_spawn = p_ptr->amount - intended_amount;
-    amount_to_spawn = max((int) 0, amount_to_spawn);
+    amount_to_spawn = std::max((int) 0, amount_to_spawn);
     
     if(amount_to_spawn == 0) return;
     
@@ -89,10 +101,12 @@ void pile_fsm::be_attacked(mob* m, void* info1, void* info2) {
             spawn_angle = get_angle(p_ptr->pos, pikmin_to_start_carrying->pos);
             spawn_pos =
                 pikmin_to_start_carrying->pos +
-                angle_to_coordinates(spawn_angle, standard_pikmin_radius * 1.5);
+                angle_to_coordinates(
+                    spawn_angle, game.config.standard_pikmin_radius * 1.5
+                );
         } else {
             spawn_pos = p_ptr->pos;
-            spawn_z = p_ptr->pil_type->height + 32.0f;
+            spawn_z = p_ptr->height + 32.0f;
             spawn_angle = randomf(0, TAU);
             spawn_h_speed = p_ptr->pil_type->radius * 3;
             spawn_v_speed = 600.0f;
@@ -102,7 +116,7 @@ void pile_fsm::be_attacked(mob* m, void* info1, void* info2) {
             (
                 (resource*)
                 create_mob(
-                    mob_categories.get(MOB_CATEGORY_RESOURCES),
+                    game.mob_categories.get(MOB_CATEGORY_RESOURCES),
                     spawn_pos, p_ptr->pil_type->contents,
                     spawn_angle, "",
         [p_ptr] (mob * m) { ((resource*) m)->origin_pile = p_ptr; }
@@ -135,6 +149,12 @@ void pile_fsm::be_attacked(mob* m, void* info1, void* info2) {
 
 /* ----------------------------------------------------------------------------
  * When a pile starts idling.
+ * m:
+ *   The mob.
+ * info1:
+ *   Unused.
+ * info2:
+ *   Unused.
  */
 void pile_fsm::become_idle(mob* m, void* info1, void* info2) {
     pile* p_ptr = (pile*) m;

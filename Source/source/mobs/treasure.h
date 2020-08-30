@@ -15,15 +15,6 @@
 #include "mob.h"
 #include "pikmin.h"
 
-enum TREASURE_STATES {
-    TREASURE_STATE_IDLE_WAITING,
-    TREASURE_STATE_IDLE_MOVING,
-    TREASURE_STATE_IDLE_STUCK,
-    TREASURE_STATE_BEING_DELIVERED,
-    
-    N_TREASURE_STATES,
-};
-
 
 /* ----------------------------------------------------------------------------
  * "Treasure" is the catch-all term for the
@@ -46,13 +37,15 @@ enum TREASURE_STATES {
  */
 class treasure : public mob {
 public:
-
+    //What type of treasure it is.
     treasure_type* tre_type;
-    float buried; //0: fully unburried. 1: fully buried.
     
+    //Constructor.
     treasure(const point &pos, treasure_type* type, const float angle);
-    void draw_mob(bitmap_effect_manager* effect_manager = NULL);
-    virtual void read_script_vars(const string &vars);
+    
+    //Mob drawing routine.
+    virtual void draw_mob();
 };
+
 
 #endif //ifndef TREASURE_INCLUDED

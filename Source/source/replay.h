@@ -8,8 +8,8 @@
  * Header for the particle class and particle-related functions.
  */
 
-#ifndef REPLAY_H
-#define REPLAY_H
+#ifndef REPLAY_INCLUDED
+#define REPLAY_INCLUDED
 
 #include <vector>
 
@@ -23,7 +23,10 @@
 #include "mobs/treasure.h"
 #include "utils/geometry_utils.h"
 
-using namespace std;
+
+using std::size_t;
+using std::string;
+using std::vector;
 
 
 enum REPLAY_ELEMENT_TYPES {
@@ -34,6 +37,7 @@ enum REPLAY_ELEMENT_TYPES {
     REPLAY_ELEMENT_ONION,
     REPLAY_ELEMENT_OBSTACLE,
 };
+
 
 enum REPLAY_EVENT_TYPES {
     //A replay element was added.
@@ -98,10 +102,6 @@ struct replay_state {
  * relevant data of every moment.
  */
 class replay {
-private:
-    vector<mob*> prev_state_mobs;
-    size_t prev_leader_nr;
-    
 public:
     vector<replay_state> states;
     
@@ -119,7 +119,13 @@ public:
     void clear();
     void finish_recording();
     void load_from_file(const string &file_name);
-    void save_to_file(const string &file_name);
+    void save_to_file(const string &file_name) const;
+    
+private:
+    vector<mob*> prev_state_mobs;
+    size_t prev_leader_nr;
+    
 };
 
-#endif //ifndef REPLAY_H
+
+#endif //ifndef REPLAY_INCLUDED

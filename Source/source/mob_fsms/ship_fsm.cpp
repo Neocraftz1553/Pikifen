@@ -11,22 +11,26 @@
 #include "ship_fsm.h"
 
 #include "../functions.h"
+#include "../game.h"
+#include "../mobs/resource.h"
 #include "../mobs/ship.h"
 #include "../particle.h"
 #include "../utils/string_utils.h"
-#include "../vars.h"
+
 
 /* ----------------------------------------------------------------------------
  * Creates the finite state machine for the ship's logic.
+ * typ:
+ *   Mob type to create the finite state machine for.
  */
 void ship_fsm::create_fsm(mob_type* typ) {
     easy_fsm_creator efc;
     
     efc.new_state("idling", SHIP_STATE_IDLING); {
-        efc.new_event(MOB_EVENT_ON_ENTER); {
+        efc.new_event(MOB_EV_ON_ENTER); {
             efc.run(ship_fsm::set_anim);
         }
-        efc.new_event(MOB_EVENT_RECEIVE_DELIVERY); {
+        efc.new_event(MOB_EV_RECEIVE_DELIVERY); {
             efc.run(ship_fsm::receive_mob);
         }
     }
@@ -45,7 +49,12 @@ void ship_fsm::create_fsm(mob_type* typ) {
 
 /* ----------------------------------------------------------------------------
  * When a ship finishes receiving a mob carried by Pikmin.
- * info1: Pointer to the mob.
+ * m:
+ *   The mob.
+ * info1:
+ *   Pointer to the mob.
+ * info2:
+ *   Unused.
  */
 void ship_fsm::receive_mob(mob* m, void* info1, void* info2) {
     engine_assert(info1 != NULL, m->print_state_history());
@@ -53,37 +62,40 @@ void ship_fsm::receive_mob(mob* m, void* info1, void* info2) {
     mob* delivery = (mob*) info1;
     ship* s_ptr = (ship*) m;
     
-    if(delivery->type->category->id == MOB_CATEGORY_TREASURES) {
-        //TODO
-    } else if(delivery->type->category->id == MOB_CATEGORY_RESOURCES) {
+    switch(delivery->type->category->id) {
+    case MOB_CATEGORY_TREASURES: {
+        break;
+    } case MOB_CATEGORY_RESOURCES: {
         resource* r_ptr = (resource*) delivery;
         if(
             r_ptr->res_type->delivery_result ==
             RESOURCE_DELIVERY_RESULT_ADD_POINTS
         ) {
-            //TODO
+        
         } else if(
             r_ptr->res_type->delivery_result ==
             RESOURCE_DELIVERY_RESULT_INCREASE_INGREDIENTS
         ) {
             size_t type_nr = r_ptr->res_type->spray_to_concoct;
-            spray_stats[type_nr].nr_ingredients++;
+            game.states.gameplay_st->spray_stats[type_nr].nr_ingredients++;
             if(
-                spray_stats[type_nr].nr_ingredients >=
-                spray_types[type_nr].ingredients_needed
+                game.states.gameplay_st->spray_stats[type_nr].nr_ingredients >=
+                game.spray_types[type_nr].ingredients_needed
             ) {
-                spray_stats[type_nr].nr_ingredients -=
-                    spray_types[type_nr].ingredients_needed;
-                spray_stats[type_nr].nr_sprays++;
+                game.states.gameplay_st->spray_stats[type_nr].nr_ingredients -=
+                    game.spray_types[type_nr].ingredients_needed;
+                game.states.gameplay_st->spray_stats[type_nr].nr_sprays++;
             }
         }
+        break;
+    }
     }
     
     particle p(
         PARTICLE_TYPE_BITMAP, s_ptr->beam_final_pos,
-        s_ptr->z + s_ptr->type->height, 24, 1.5, PARTICLE_PRIORITY_MEDIUM
+        s_ptr->z + s_ptr->height, 24, 1.5, PARTICLE_PRIORITY_MEDIUM
     );
-    p.bitmap = bmp_smoke;
+    p.bitmap = game.sys_assets.bmp_smoke;
     particle_generator pg(0, p, 15);
     pg.number_deviation = 5;
     pg.angle = 0;
@@ -91,13 +103,19 @@ void ship_fsm::receive_mob(mob* m, void* info1, void* info2) {
     pg.total_speed = 70;
     pg.total_speed_deviation = 10;
     pg.duration_deviation = 0.5;
-    pg.emit(particles);
+    pg.emit(game.states.gameplay_st->particles);
     
 }
 
 
 /* ----------------------------------------------------------------------------
  * When a ship needs to enter its default "idling" animation.
+ * m:
+ *   The mob.
+ * info1:
+ *   Unused.
+ * info2:
+ *   Unused.
  */
 void ship_fsm::set_anim(mob* m, void* info1, void* info2) {
     m->set_animation(SHIP_ANIM_IDLING);

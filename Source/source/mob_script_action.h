@@ -23,12 +23,14 @@ enum MOB_ACTION_TYPES {
     MOB_ACTION_ARACHNORB_PLAN_LOGIC,
     MOB_ACTION_CALCULATE,
     MOB_ACTION_DELETE,
+    MOB_ACTION_DRAIN_LIQUID,
     MOB_ACTION_ELSE,
     MOB_ACTION_END_IF,
     MOB_ACTION_FINISH_DYING,
     MOB_ACTION_FOCUS,
     MOB_ACTION_GET_CHOMPED,
     MOB_ACTION_GET_INFO,
+    MOB_ACTION_GET_FOCUS_VAR,
     MOB_ACTION_GET_RANDOM_DECIMAL,
     MOB_ACTION_GET_RANDOM_INT,
     MOB_ACTION_GOTO,
@@ -39,20 +41,24 @@ enum MOB_ACTION_TYPES {
     MOB_ACTION_MOVE_TO_TARGET,
     MOB_ACTION_ORDER_RELEASE,
     MOB_ACTION_PLAY_SOUND,
+    MOB_ACTION_PRINT,
     MOB_ACTION_RECEIVE_STATUS,
     MOB_ACTION_RELEASE,
     MOB_ACTION_REMOVE_STATUS,
+    MOB_ACTION_SEND_MESSAGE_TO_FOCUS,
     MOB_ACTION_SEND_MESSAGE_TO_LINKS,
     MOB_ACTION_SEND_MESSAGE_TO_NEARBY,
     MOB_ACTION_SET_ANIMATION,
     MOB_ACTION_SET_FAR_REACH,
     MOB_ACTION_SET_GRAVITY,
     MOB_ACTION_SET_HEALTH,
+    MOB_ACTION_SET_HEIGHT,
     MOB_ACTION_SET_HIDING,
     MOB_ACTION_SET_HOLDABLE,
     MOB_ACTION_SET_HUNTABLE,
     MOB_ACTION_SET_LIMB_ANIMATION,
     MOB_ACTION_SET_NEAR_REACH,
+    MOB_ACTION_SET_SECTOR_SCROLL,
     MOB_ACTION_SET_STATE,
     MOB_ACTION_SET_TANGIBLE,
     MOB_ACTION_SET_TEAM,
@@ -81,6 +87,7 @@ enum MOB_ACTION_TYPES {
     N_MOB_ACTIONS
 };
 
+
 //Arachnorb plan logic action sub-types.
 enum MOB_ACTION_ARACHNORB_PLAN_LOGIC_TYPES {
     MOB_ACTION_ARACHNORB_PLAN_LOGIC_HOME,
@@ -89,6 +96,7 @@ enum MOB_ACTION_ARACHNORB_PLAN_LOGIC_TYPES {
     MOB_ACTION_ARACHNORB_PLAN_LOGIC_CCW_TURN,
 };
 
+
 //Face action sub-types.
 enum MOB_ACTION_TURN_TYPES {
     MOB_ACTION_TURN_ARACHNORB_HEAD_LOGIC,
@@ -96,11 +104,14 @@ enum MOB_ACTION_TURN_TYPES {
     MOB_ACTION_TURN_HOME,
 };
 
+
 //Focus action sub-types.
 enum MOB_ACTION_FOCUS_TYPES {
-    MOB_ACTION_FOCUS_TRIGGER,
+    MOB_ACTION_FOCUS_LINK,
     MOB_ACTION_FOCUS_PARENT,
+    MOB_ACTION_FOCUS_TRIGGER,
 };
+
 
 //If action operator types.
 enum MOB_ACTION_IF_OPERATOR_TYPES {
@@ -111,6 +122,7 @@ enum MOB_ACTION_IF_OPERATOR_TYPES {
     MOB_ACTION_IF_OP_LESS_E,
     MOB_ACTION_IF_OP_MORE_E,
 };
+
 
 //Get info action info types.
 enum MOB_ACTION_GET_INFO_TYPES {
@@ -127,7 +139,9 @@ enum MOB_ACTION_GET_INFO_TYPES {
     MOB_ACTION_GET_INFO_MOB_CATEGORY,
     MOB_ACTION_GET_INFO_MOB_TYPE,
     MOB_ACTION_GET_INFO_OTHER_BODY_PART,
+    MOB_ACTION_GET_INFO_WEIGHT,
 };
+
 
 //Moving action sub-types.
 enum MOB_ACTION_MOVE_TYPES {
@@ -139,9 +153,11 @@ enum MOB_ACTION_MOVE_TYPES {
     MOB_ACTION_MOVE_LINKED_MOB_AVERAGE,
 };
 
+
 enum MOB_ACTION_SET_ANIMATION_OPTIONS {
     MOB_ACTION_SET_ANIMATION_NO_RESTART,
 };
+
 
 //Set var action sub-types.
 enum MOB_ACTION_SET_VAR_TYPES {
@@ -151,6 +167,7 @@ enum MOB_ACTION_SET_VAR_TYPES {
     MOB_ACTION_SET_VAR_DIVIDE,
     MOB_ACTION_SET_VAR_MODULO,
 };
+
 
 //Stabilize Z action sub-types.
 enum MOB_ACTION_STABILIZE_Z_TYPES {
@@ -227,12 +244,10 @@ struct mob_action_call {
     vector<bool> arg_is_var;
     
     string custom_error;
-    MOB_EVENT_TYPES parent_event;
+    MOB_EV_TYPES parent_event;
     mob_type* mt;
     
-    bool load_from_data_node(
-        data_node* dn, vector<mob_state*>* states, mob_type* mt
-    );
+    bool load_from_data_node(data_node* dn, mob_type* mt);
     bool run(mob* m, void* custom_data_1, void* custom_data_2);
     
     mob_action_call(MOB_ACTION_TYPES type = MOB_ACTION_UNKNOWN);
@@ -246,10 +261,12 @@ void add_health(mob_action_run_data &data);
 void arachnorb_plan_logic(mob_action_run_data &data);
 void calculate(mob_action_run_data &data);
 void delete_function(mob_action_run_data &data);
+void drain_liquid(mob_action_run_data &data);
 void finish_dying(mob_action_run_data &data);
 void focus(mob_action_run_data &data);
 void get_chomped(mob_action_run_data &data);
 void get_info(mob_action_run_data &data);
+void get_focus_var(mob_action_run_data &data);
 void get_random_decimal(mob_action_run_data &data);
 void get_random_int(mob_action_run_data &data);
 void goto_function(mob_action_run_data &data);
@@ -259,21 +276,25 @@ void move_to_relative(mob_action_run_data &data);
 void move_to_target(mob_action_run_data &data);
 void order_release(mob_action_run_data &data);
 void play_sound(mob_action_run_data &data);
+void print(mob_action_run_data &data);
 void receive_status(mob_action_run_data &data);
 void release(mob_action_run_data &data);
 void remove_status(mob_action_run_data &data);
+void send_message_to_focus(mob_action_run_data &data);
 void send_message_to_links(mob_action_run_data &data);
 void send_message_to_nearby(mob_action_run_data &data);
 void set_animation(mob_action_run_data &data);
 void set_far_reach(mob_action_run_data &data);
 void set_gravity(mob_action_run_data &data);
 void set_health(mob_action_run_data &data);
+void set_height(mob_action_run_data &data);
 void set_hiding(mob_action_run_data &data);
 void set_holdable(mob_action_run_data &data);
 void set_huntable(mob_action_run_data &data);
 void set_limb_animation(mob_action_run_data &data);
 void set_near_reach(mob_action_run_data &data);
 void set_state(mob_action_run_data &data);
+void set_sector_scroll(mob_action_run_data &data);
 void set_tangible(mob_action_run_data &data);
 void set_team(mob_action_run_data &data);
 void set_timer(mob_action_run_data &data);
@@ -299,6 +320,7 @@ void turn_to_relative(mob_action_run_data &data);
 void turn_to_target(mob_action_run_data &data);
 };
 
+
 namespace mob_action_loaders {
 bool arachnorb_plan_logic(mob_action_call &call);
 bool calculate(mob_action_call &call);
@@ -323,7 +345,7 @@ void report_enum_error(mob_action_call &call, const size_t arg_nr);
 };
 
 
-bool assert_branching_actions(
+bool assert_actions(
     const vector<mob_action_call*> &actions, data_node* dn
 );
 void load_init_actions(

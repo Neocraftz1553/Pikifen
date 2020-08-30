@@ -19,19 +19,10 @@
 #include "menu_widgets.h"
 #include "mobs/mob.h"
 
-using namespace std;
 
-enum GAME_STATES {
-    GAME_STATE_MAIN_MENU,
-    GAME_STATE_AREA_MENU,
-    GAME_STATE_OPTIONS_MENU,
-    GAME_STATE_CONTROLS_MENU,
-    GAME_STATE_GAME,
-    GAME_STATE_AREA_EDITOR,
-    GAME_STATE_ANIMATION_EDITOR,
-    
-    N_GAME_STATES,
-};
+using std::size_t;
+using std::vector;
+
 
 /* ----------------------------------------------------------------------------
  * A game macro-state. It might be easier to think of this as a "screen".
@@ -59,13 +50,15 @@ public:
     );
     
     game_state();
-    virtual ~game_state();
+    virtual ~game_state() = default;
     virtual void load() = 0;
     virtual void unload() = 0;
-    virtual void handle_controls(const ALLEGRO_EVENT &ev) = 0;
+    virtual void handle_allegro_event(ALLEGRO_EVENT &ev) = 0;
     virtual void do_logic() = 0;
     virtual void do_drawing() = 0;
     virtual void update_transformations();
+    virtual string get_name() const = 0;
 };
+
 
 #endif //ifndef GAME_STATE_INCLUDED

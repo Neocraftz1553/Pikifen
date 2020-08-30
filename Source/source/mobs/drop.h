@@ -15,16 +15,6 @@
 #include "mob.h"
 
 
-enum DROP_STATES {
-    DROP_STATE_IDLING,
-    DROP_STATE_FALLING,
-    DROP_STATE_LANDING,
-    DROP_STATE_BUMPED,
-    
-    N_DROP_STATES,
-};
-
-
 /* ----------------------------------------------------------------------------
  * A drop mob. This is a droplet that sits on the ground and can be consumed
  * by certain mobs. When that happens, some effect is triggered, depending
@@ -32,15 +22,24 @@ enum DROP_STATES {
  */
 class drop : public mob {
 public:
+    //What type of drop it is.
     drop_type* dro_type;
+    
+    //Current scale. Used for shrinking.
     float cur_scale;
+    //How many doses are left.
     size_t doses_left;
     
+    //Constructor.
     drop(const point &pos, drop_type* dro_type, const float angle);
     
-    virtual void draw_mob(bitmap_effect_manager* effect_manager = NULL);
-    virtual void tick_class_specifics();
+    //Mob drawing routine.
+    virtual void draw_mob();
     
+protected:
+    //Tick class-specific logic.
+    virtual void tick_class_specifics(const float delta_t);
 };
+
 
 #endif //ifndef DROP_INCLUDED

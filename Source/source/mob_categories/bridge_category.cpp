@@ -12,8 +12,8 @@
 
 #include "bridge_category.h"
 
+#include "../game.h"
 #include "../mobs/bridge.h"
-#include "../vars.h"
 
 
 /* ----------------------------------------------------------------------------
@@ -22,29 +22,38 @@
 bridge_category::bridge_category() :
     mob_category(
         MOB_CATEGORY_BRIDGES, "Bridge", "Bridges",
-        BRIDGES_FOLDER_PATH, al_map_rgb(224, 200, 180)
+        "Bridges", al_map_rgb(204, 73, 152)
     ) {
     
 }
 
 
 /* ----------------------------------------------------------------------------
- * Returns all types of bridge by name.
+ * Clears the list of registered types of bridges.
  */
-void bridge_category::get_type_names(vector<string> &list) {
-    for(auto t = bridge_types.begin(); t != bridge_types.end(); ++t) {
-        list.push_back(t->first);
+void bridge_category::clear_types() {
+    for(auto &t : game.mob_types.bridge) {
+        delete t.second;
     }
+    game.mob_types.bridge.clear();
 }
 
 
 /* ----------------------------------------------------------------------------
- * Returns a type of bridge given its name, or NULL on error.
+ * Creates a bridge and adds it to the list of bridges.
+ * pos:
+ *   Starting coordinates.
+ * type:
+ *   Mob type.
+ * angle:
+ *   Starting angle.
  */
-mob_type* bridge_category::get_type(const string &name) {
-    auto it = bridge_types.find(name);
-    if(it == bridge_types.end()) return NULL;
-    return it->second;
+mob* bridge_category::create_mob(
+    const point &pos, mob_type* type, const float angle
+) {
+    bridge* m = new bridge(pos, (bridge_type*) type, angle);
+    game.states.gameplay_st->mobs.bridges.push_back(m);
+    return m;
 }
 
 
@@ -57,44 +66,50 @@ mob_type* bridge_category::create_type() {
 
 
 /* ----------------------------------------------------------------------------
- * Registers a created type of bridge.
- */
-void bridge_category::register_type(mob_type* type) {
-    bridge_types[type->name] = (bridge_type*) type;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Creates a bridge and adds it to the list of bridges.
- */
-mob* bridge_category::create_mob(
-    const point &pos, mob_type* type, const float angle
-) {
-    bridge* m = new bridge(pos, (bridge_type*) type, angle);
-    bridges.push_back(m);
-    return m;
-}
-
-
-/* ----------------------------------------------------------------------------
  * Clears a bridge from the list of bridges.
+ * m:
+ *   The mob to erase.
  */
 void bridge_category::erase_mob(mob* m) {
-    bridges.erase(
-        find(bridges.begin(), bridges.end(), (bridge*) m)
+    game.states.gameplay_st->mobs.bridges.erase(
+        find(
+            game.states.gameplay_st->mobs.bridges.begin(),
+            game.states.gameplay_st->mobs.bridges.end(),
+            (bridge*) m
+        )
     );
 }
 
 
 /* ----------------------------------------------------------------------------
- * Clears the list of registered types of bridges.
+ * Returns a type of bridge given its name, or NULL on error.
+ * name:
+ *   Name of the mob type to get.
  */
-void bridge_category::clear_types() {
-    for(auto t = bridge_types.begin(); t != bridge_types.end(); ++t) {
-        delete t->second;
-    }
-    bridge_types.clear();
+mob_type* bridge_category::get_type(const string &name) const {
+    auto it = game.mob_types.bridge.find(name);
+    if(it == game.mob_types.bridge.end()) return NULL;
+    return it->second;
 }
 
 
-bridge_category::~bridge_category() { }
+/* ----------------------------------------------------------------------------
+ * Returns all types of bridge by name.
+ * list:
+ *   This list gets filled with the mob type names.
+ */
+void bridge_category::get_type_names(vector<string> &list) const {
+    for(auto &t : game.mob_types.bridge) {
+        list.push_back(t.first);
+    }
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Registers a created type of bridge.
+ * type:
+ *   Mob type to register.
+ */
+void bridge_category::register_type(mob_type* type) {
+    game.mob_types.bridge[type->name] = (bridge_type*) type;
+}

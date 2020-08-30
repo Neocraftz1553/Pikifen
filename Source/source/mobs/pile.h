@@ -14,12 +14,6 @@
 #include "../mob_types/pile_type.h"
 #include "mob.h"
 
-enum PILE_STATES {
-    PILE_STATE_IDLING,
-    
-    N_PILE_STATES,
-};
-
 
 /* ----------------------------------------------------------------------------
  * A pile is an object that represents a collection of resource-type mobs.
@@ -28,18 +22,31 @@ enum PILE_STATES {
  */
 class pile : public mob, public mob_with_anim_groups {
 public:
-
+    //What type of pile it is.
     pile_type* pil_type;
+    
+    //Current amount of resources.
     size_t amount;
+    //Time left until it recharges.
     timer recharge_timer;
     
+    //Change its current amount of resources.
     void change_amount(const int change);
+    //Recharge.
     void recharge();
+    //Update one tick.
     void update();
     
+    //Constructor.
     pile(const point &pos, pile_type* type, const float angle);
-    virtual void read_script_vars(const string &vars);
-    virtual void tick_class_specifics();
+    
+    //Read script variables from the area data.
+    virtual void read_script_vars(const script_var_reader &svr);
+    
+protected:
+    //Tick class-specific logic.
+    virtual void tick_class_specifics(const float delta_t);
 };
+
 
 #endif //ifndef PILE_INCLUDED

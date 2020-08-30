@@ -13,10 +13,11 @@
 
 #include <allegro5/allegro.h>
 
-#include "../data_file.h"
 #include "../spray_type.h"
 #include "../status.h"
+#include "../utils/data_file.h"
 #include "mob_type.h"
+
 
 enum DROP_ANIMATIONS {
     DROP_ANIM_IDLING,
@@ -25,15 +26,27 @@ enum DROP_ANIMATIONS {
     DROP_ANIM_BUMPED,
 };
 
+
 enum DROP_CONSUMERS {
     DROP_CONSUMER_LEADERS,
     DROP_CONSUMER_PIKMIN,
 };
 
+
 enum DROP_EFFECT {
     DROP_EFFECT_MATURATE,
     DROP_EFFECT_INCREASE_SPRAYS,
     DROP_EFFECT_GIVE_STATUS,
+};
+
+
+enum DROP_STATES {
+    DROP_STATE_IDLING,
+    DROP_STATE_FALLING,
+    DROP_STATE_LANDING,
+    DROP_STATE_BUMPED,
+    
+    N_DROP_STATES,
 };
 
 
@@ -51,9 +64,9 @@ public:
     float shrink_speed;
     
     drop_type();
-    ~drop_type();
-    void load_parameters(data_node* file);
-    anim_conversion_vector get_anim_conversions();
+    void load_properties(data_node* file);
+    anim_conversion_vector get_anim_conversions() const;
 };
+
 
 #endif //ifndef DROP_TYPE_INCLUDED

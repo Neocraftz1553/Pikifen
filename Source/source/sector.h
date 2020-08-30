@@ -11,6 +11,7 @@
 #ifndef SECTOR_INCLUDED
 #define SECTOR_INCLUDED
 
+#include <map>
 #include <set>
 #include <unordered_set>
 #include <vector>
@@ -25,8 +26,15 @@
 #include "mob_types/mob_type.h"
 #include "weather.h"
 
-using namespace std;
 
+using std::map;
+using std::set;
+using std::size_t;
+using std::unordered_set;
+using std::vector;
+
+
+const float LIQUID_DRAIN_DURATION = 2.0f;
 
 struct area_data;
 struct blockmap;
@@ -36,7 +44,6 @@ struct path_link;
 struct sector;
 struct triangle;
 struct vertex;
-typedef vector<vertex*> polygon;
 
 enum TRIANGULATION_ERRORS {
     //No error occured.
@@ -84,9 +91,9 @@ struct blockmap {
     size_t n_cols, n_rows;
     
     blockmap();
-    size_t get_col(const float x);
-    size_t get_row(const float y);
-    point get_top_left_corner(const size_t col, const size_t row);
+    size_t get_col(const float x) const;
+    size_t get_row(const float y) const;
+    point get_top_left_corner(const size_t col, const size_t row) const;
     void clear();
 };
 
@@ -104,12 +111,17 @@ struct edge {
     size_t sector_nrs[2];
     
     edge(size_t v1_nr = INVALID, size_t v2_nr = INVALID);
-    vertex* get_other_vertex(vertex* v_ptr);
-    size_t get_side_with_sector(sector* s_ptr);
-    vertex* has_neighbor(edge* other);
+    sector* get_other_sector(const sector* v_ptr) const;
+    vertex* get_other_vertex(const vertex* v_ptr) const;
+    size_t get_side_with_sector(sector* s_ptr) const;
+    vertex* has_neighbor(edge* other) const;
+    bool is_valid() const;
     size_t remove_from_sectors();
     size_t remove_from_vertexes();
     void swap_vertexes();
+    void transfer_sector(
+        sector* from, sector* to, const size_t to_nr, const size_t edge_nr
+    );
 };
 
 
@@ -131,7 +143,7 @@ struct path_stop {
         const vector<path_link> &links = vector<path_link>()
     );
     void add_link(path_stop* other_stop, const bool normal);
-    size_t get_link(path_stop* other_stop);
+    size_t get_link(path_stop* other_stop) const;
     void remove_link(path_stop* other_stop);
     void calculate_dists();
     void calculate_dists_plus_neighbors();
@@ -142,12 +154,17 @@ struct path_stop {
 
 /* ----------------------------------------------------------------------------
  * Info about a path link. A path stop can link to N other path stops,
- * and this structure holds information about the connection.
+ * and this structure holds information about a connection.
  */
 struct path_link {
+    //Pointer to the path stop at the end.
     path_stop* end_ptr;
+    //Index number of the path stop at the end.
     size_t end_nr;
+    //Distance between the two stops.
     float distance;
+    //Is the stop currently blocked by an obstacle? Cache for performance.
+    bool blocked_by_obstacle;
     
     path_link(path_stop* end_ptr, size_t end_nr);
     void calculate_dist(path_stop* start_ptr);
@@ -193,7 +210,9 @@ struct sector {
     string hazards_str; //For the editor.
     vector<hazard*> hazards; //For gameplay.
     bool hazard_floor;
-    liquid* associated_liquid;
+    float liquid_drain_left;
+    bool draining_liquid;
+    point scroll;
     
     vector<size_t> edge_nrs;
     vector<edge*> edges;
@@ -203,9 +222,17 @@ struct sector {
     
     sector();
     void add_edge(edge* e_ptr, const size_t e_nr);
+    void calculate_bounding_box();
     void clone(sector* new_sector);
-    void get_texture_merge_sectors(sector** s1, sector** s2);
+    vertex* get_rightmost_vertex() const;
+    void get_texture_merge_sectors(sector** s1, sector** s2) const;
+    bool is_clockwise() const;
+    bool is_point_in_sector(const point &p) const;
     void remove_edge(edge* e_ptr);
+    void get_neighbor_sectors_conditionally(
+        const std::function<bool(sector* s_ptr)> &condition,
+        vector<sector*> &sector_list
+    );
     ~sector();
 };
 
@@ -213,7 +240,7 @@ struct sector {
 
 
 /* ----------------------------------------------------------------------------
- * A triangle. Sectors (polygons) are made out of triangles.
+ * A triangle. Sectors (essentially polygons) are made out of triangles.
  * These are used to detect whether a point is inside a sector,
  * and to draw, seeing as OpenGL cannot draw concave polygons.
  */
@@ -236,10 +263,29 @@ struct vertex {
     
     vertex(float x = 0.0f, float y = 0.0f);
     void add_edge(edge* e_ptr, const size_t e_nr);
-    edge* get_edge_by_neighbor(vertex* neighbor);
-    bool has_edge(edge* e_ptr);
-    bool is_2nd_degree_neighbor(vertex* other_v, vertex** first_neighbor);
+    edge* get_edge_by_neighbor(vertex* neighbor) const;
+    bool has_edge(edge* e_ptr) const;
+    bool is_2nd_degree_neighbor(vertex* other_v, vertex** first_neighbor) const;
+    bool is_2nd_degree_neighbor(edge* other_e, vertex** first_neighbor) const;
+    bool is_neighbor(vertex* v_ptr) const;
     void remove_edge(edge* e_ptr);
+};
+
+
+
+
+/* ----------------------------------------------------------------------------
+ * Represents a series of vertexes that make up a polygon.
+ */
+struct polygon {
+    vector<vertex*> vertexes;
+    
+    void clean();
+    void cut(vector<polygon>* inners);
+    vertex* get_rightmost_vertex() const;
+    
+    polygon();
+    polygon(const vector<vertex*> &vertexes);
 };
 
 
@@ -297,6 +343,19 @@ struct tree_shadow {
 
 
 /* ----------------------------------------------------------------------------
+ * A structure holding info on the geometry problems the area currently has.
+ */
+struct geometry_problems {
+    //Non-simple sectors found, and their reason for being broken.
+    map<sector*, TRIANGULATION_ERRORS> non_simples;
+    //List of lone edges found.
+    unordered_set<edge*> lone_edges;
+};
+
+
+
+
+/* ----------------------------------------------------------------------------
  * A structure that holds all of the
  * info about the current area, so that
  * the sectors know how to communicate with
@@ -321,13 +380,15 @@ struct area_data {
     string name;
     string subtitle;
     
-    string creator;
+    string maker;
     string version;
     string notes;
     string spray_amounts;
     
     weather weather_condition;
     string weather_name;
+    
+    geometry_problems problems;
     
     area_data();
     void check_stability();
@@ -336,10 +397,10 @@ struct area_data {
     void connect_edge_to_vertex(edge* e_ptr, vertex* v_ptr, size_t endpoint);
     void connect_sector_edges(sector* s_ptr);
     void connect_vertex_edges(vertex* v_ptr);
-    size_t find_edge_nr(const edge* e_ptr);
-    size_t find_mob_gen_nr(const mob_gen* m_ptr);
-    size_t find_sector_nr(const sector* s_ptr);
-    size_t find_vertex_nr(const vertex* v_ptr);
+    size_t find_edge_nr(const edge* e_ptr) const;
+    size_t find_mob_gen_nr(const mob_gen* m_ptr) const;
+    size_t find_sector_nr(const sector* s_ptr) const;
+    size_t find_vertex_nr(const vertex* v_ptr) const;
     void fix_edge_nrs(edge* e_ptr);
     void fix_edge_pointers(edge* e_ptr);
     void fix_path_stop_nrs(path_stop* s_ptr);
@@ -350,6 +411,7 @@ struct area_data {
     void fix_vertex_pointers(vertex* v_ptr);
     void generate_blockmap();
     void generate_edges_blockmap(vector<edge*> &edges);
+    size_t get_nr_path_links();
     edge* new_edge();
     sector* new_sector();
     vertex* new_vertex();
@@ -365,27 +427,39 @@ struct area_data {
 
 
 
-void clean_poly(polygon* p);
-void cut_poly(polygon* outer, vector<polygon>* inners);
+/* ----------------------------------------------------------------------------
+ * Manages the paths in the area, particularly whether they are blocked
+ * by an obstacle or not.
+ */
+struct path_manager {
+    map<path_link*, unordered_set<mob*> > obstructions;
+    
+    void handle_area_load();
+    void handle_obstacle_clear(mob* m);
+    void clear();
+};
+
+
+
+
 void depth_first_search(
     vector<path_stop*> &nodes,
     unordered_set<path_stop*> &visited, path_stop* start
 );
 vector<path_stop*> dijkstra(
     path_stop* start_node, path_stop* end_node,
-    const bool ignore_obstacles,
-    unordered_set<mob*>* obstacles_found, float* total_dist
+    const bool ignore_obstacles, float* total_dist
 );
 void get_cce(
     vector<vertex> &vertexes_left, vector<size_t> &ears,
     vector<size_t> &convex_vertexes, vector<size_t> &concave_vertexes
 );
-vector<pair<dist, vertex*> > get_merge_vertexes(
+vector<std::pair<dist, vertex*> > get_merge_vertexes(
     const point &p, vector<vertex*> &all_vertexes, const float merge_radius
 );
 vector<path_stop*> get_path(
     const point &start, const point &end,
-    unordered_set<mob*>* obstacles_found, bool* go_straight, float* get_dist
+    bool* go_straight, float* get_dist
 );
 mob* get_path_link_obstacle(path_stop* s1, path_stop* s2);
 TRIANGULATION_ERRORS get_polys(
@@ -393,24 +467,15 @@ TRIANGULATION_ERRORS get_polys(
     set<edge*>* lone_edges, const bool check_vertex_reuse
 );
 vertex* get_rightmost_vertex(map<edge*, bool> &edges);
-vertex* get_rightmost_vertex(polygon* p);
-vertex* get_rightmost_vertex(sector* s);
 vertex* get_rightmost_vertex(vertex* v1, vertex* v2);
 sector* get_sector(
     const point &p, size_t* sector_nr, const bool use_blockmap
 );
-void get_sector_bounding_box(
-    sector* s_ptr, point* min_coords, point* max_coords
-);
-bool is_edge_valid(edge* l);
-bool is_path_link_ok(path_stop* s1, path_stop* s2);
 bool is_polygon_clockwise(vector<vertex*> &vertexes);
-bool is_sector_clockwise(sector* s_ptr);
-bool is_vertex_convex(const vector<vertex> &vec, const size_t nr);
+bool is_vertex_convex(const vector<vertex*> &vec, const size_t nr);
 bool is_vertex_ear(
-    const vector<vertex> &vec, const vector<size_t> &concaves, const size_t nr
+    const vector<vertex*> &vec, const vector<size_t> &concaves, const size_t nr
 );
-bool is_point_in_sector(const point &p, sector* s_ptr);
 TRIANGULATION_ERRORS triangulate(
     sector* s_ptr, set<edge*>* lone_edges, const bool check_vertex_reuse,
     const bool clear_lone_edges
@@ -424,6 +489,7 @@ enum SECTOR_TYPES {
     SECTOR_TYPE_BRIDGE_RAIL,
 };
 
+
 enum TERRAIN_SOUNDS {
     TERRAIN_SOUND_NONE,
     TERRAIN_SOUND_DIRT,
@@ -433,6 +499,7 @@ enum TERRAIN_SOUNDS {
     TERRAIN_SOUND_METAL,
     TERRAIN_SOUND_WATER,
 };
+
 
 const float BLOCKMAP_BLOCK_SIZE = 128;
 const unsigned char DEF_SECTOR_BRIGHTNESS = 255;

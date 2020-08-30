@@ -8,20 +8,20 @@
  * Editor-related functions.
  */
 
+#include <algorithm>
+
 #include "editor.h"
 
 #include "../drawing.h"
 #include "../functions.h"
-#include "../LAFI/angle_picker.h"
-#include "../LAFI/button.h"
-#include "../LAFI/checkbox.h"
-#include "../LAFI/radio_button.h"
-#include "../LAFI/scrollbar.h"
-#include "../LAFI/textbox.h"
+#include "../game.h"
+#include "../imgui/imgui_impl_allegro5.h"
+#include "../imgui/imgui_stdlib.h"
 #include "../load.h"
-#include "../utils/math_utils.h"
+#include "../mob_categories/mob_category.h"
+#include "../mob_types/mob_type.h"
+#include "../utils/imgui_utils.h"
 #include "../utils/string_utils.h"
-#include "../vars.h"
 
 
 //Every icon in the icon bitmap file is these many pixels from the previous.
@@ -32,10 +32,6 @@ const int editor::EDITOR_ICON_BMP_SIZE = 24;
 const float editor::DOUBLE_CLICK_TIMEOUT = 0.5f;
 //How much to zoom in/out with the keyboard keys.
 const float editor::KEYBOARD_CAM_ZOOM = 0.25f;
-//How long to override the status bar text for, for important messages.
-const float editor::STATUS_OVERRIDE_IMPORTANT_DURATION = 6.0f;
-//How long to override the status bar text for, for unimportant messages.
-const float editor::STATUS_OVERRIDE_UNIMPORTANT_DURATION = 1.5f;
 //How long the unsaved changes warning stays on-screen for.
 const float editor::UNSAVED_CHANGES_WARNING_DURATION = 3.0f;
 //Height of the unsaved changes warning, sans spike.
@@ -45,20 +41,17 @@ const int editor::UNSAVED_CHANGES_WARNING_SPIKE_SIZE = 16;
 //Width of the unsaved changes warning, sans spike.
 const int editor::UNSAVED_CHANGES_WARNING_WIDTH = 150;
 
+
 /* ----------------------------------------------------------------------------
  * Initializes editor class stuff.
  */
 editor::editor() :
-    cur_picker_id(0),
+    canvas_separator_x(-1),
     double_click_time(0),
-    frm_picker(nullptr),
-    frm_toolbar(nullptr),
-    gui(nullptr),
-    holding_m1(false),
-    holding_m2(false),
-    holding_m3(false),
     is_ctrl_pressed(false),
-    is_gui_focused(false),
+    is_m1_pressed(false),
+    is_m2_pressed(false),
+    is_m3_pressed(false),
     is_shift_pressed(false),
     last_mouse_click(INVALID),
     loaded_content_yet(false),
@@ -68,23 +61,13 @@ editor::editor() :
     sub_state(0),
     unsaved_changes_warning_timer(UNSAVED_CHANGES_WARNING_DURATION),
     zoom_max_level(0),
-    zoom_min_level(0) {
+    zoom_min_level(0),
+    special_input_focus_controller(0) {
     
     editor_icons.reserve(N_EDITOR_ICONS);
     for(size_t i = 0; i < N_EDITOR_ICONS; ++i) {
         editor_icons.push_back(NULL);
     }
-    
-    status_override_timer =
-    timer(STATUS_OVERRIDE_IMPORTANT_DURATION, [this] () {update_status_bar();});
-    
-}
-
-
-/* ----------------------------------------------------------------------------
- * Destroys an instance of the editor class.
- */
-editor::~editor() {
 }
 
 
@@ -93,6 +76,10 @@ editor::~editor() {
  * A bit of padding is added, so that, for instance, the top-left
  * point isn't exactly on the top-left of the screen,
  * where it's hard to see.
+ * min_coords:
+ *   Top-left coordinates of the content to focus on.
+ * max_coords:
+ *   Bottom-right coordinates of the content to focus on.
  */
 void editor::center_camera(
     const point &min_coords, const point &max_coords
@@ -107,15 +94,16 @@ void editor::center_camera(
     float width = max_c.x - min_c.x;
     float height = max_c.y - min_c.y;
     
-    cam_pos.x = floor(min_c.x + width  / 2);
-    cam_pos.y = floor(min_c.y + height / 2);
+    game.cam.target_pos.x = floor(min_c.x + width  / 2);
+    game.cam.target_pos.y = floor(min_c.y + height / 2);
     
     float z;
     if(width > height) z = (canvas_br.x - canvas_tl.x) / width;
     else z = (canvas_br.y - canvas_tl.y) / height;
     z -= z * 0.1;
     
-    zoom(z, false);
+    game.cam.target_zoom = z;
+    update_transformations();
 }
 
 
@@ -123,19 +111,21 @@ void editor::center_camera(
  * Checks if there are any unsaved changes that have not been notified yet.
  * Returns true if there are, and also sets up the unsaved changes warning.
  * Returns false if everything is okay to continue.
- * caller_widget: Widget that summoned this warning.
+ * pos:
+ *   Screen coordinates to show the warning on.
+ *   If 0,0, then these will be set to the last processed widget's position.
  */
-bool editor::check_new_unsaved_changes(lafi::widget* caller_widget) {
+bool editor::check_new_unsaved_changes(const point &pos) {
     unsaved_changes_warning_timer.stop();
     
     if(!made_new_changes) return false;
     made_new_changes = false;
     
-    unsaved_changes_warning_pos =
-        point(
-            (caller_widget->x1 + caller_widget->x2) / 2.0,
-            (caller_widget->y1 + caller_widget->y2) / 2.0
-        );
+    if(pos.x == 0 && pos.y == 0) {
+        unsaved_changes_warning_pos = get_last_widget_pos();
+    } else {
+        unsaved_changes_warning_pos = pos;
+    }
     unsaved_changes_warning_timer.start();
     
     return true;
@@ -143,112 +133,11 @@ bool editor::check_new_unsaved_changes(lafi::widget* caller_widget) {
 
 
 /* ----------------------------------------------------------------------------
- * Creates a "picker" frame in the gui, used for picking objects
- * from a list.
+ * Closes the topmost dialog.
  */
-void editor::create_picker_frame() {
-
-    frm_picker =
-        new lafi::frame(canvas_br.x, 0, scr_w, scr_h);
-    frm_picker->hide();
-    gui->add("frm_picker", frm_picker);
-    
-    frm_picker->add(
-        "but_back",
-        new lafi::button(canvas_br.x + 8, 8, canvas_br.x + 96, 24, "Back")
-    );
-    frm_picker->add(
-        "lbl_title",
-        new lafi::label(canvas_br.x + 8, 32, scr_w - 8, 44)
-    );
-    frm_picker->add(
-        "txt_text",
-        new lafi::textbox(canvas_br.x + 8, 52, scr_w - 48, 68)
-    );
-    frm_picker->add(
-        "but_new",
-        new lafi::button(scr_w - 40, 44, scr_w - 8, 76, "+")
-    );
-    
-    frm_picker->add(
-        "frm_list",
-        new lafi::frame(canvas_br.x + 8, 84, scr_w - 32, scr_h - 8)
-    );
-    frm_picker->add(
-        "bar_scroll",
-        new lafi::scrollbar(scr_w - 24, 84, scr_w - 8, scr_h - 8)
-    );
-    
-    
-    frm_picker->widgets["but_back"]->left_mouse_click_handler =
-    [this] (lafi::widget*, int, int) {
-        this->frm_picker->hide();
-        frm_toolbar->show();
-        change_to_right_frame();
-        custom_picker_cancel_action();
-    };
-    frm_picker->widgets["but_back"]->description =
-        "Cancel.";
-        
-    ((lafi::textbox*) frm_picker->widgets["txt_text"])->enter_key_widget =
-        frm_picker->widgets["but_new"];
-    ((lafi::textbox*) frm_picker->widgets["txt_text"])->change_handler =
-    [this] (lafi::widget * t) {
-        populate_picker(((lafi::textbox*) t)->text);
-    };
-    frm_picker->widgets["txt_text"]->description =
-        "Name of the element to create (if possible), or search filter.";
-        
-    frm_picker->widgets["but_new"]->left_mouse_click_handler =
-    [this] (lafi::widget*, int, int) {
-        string name =
-            get_textbox_text(this->frm_picker, "txt_text");
-        if(name.empty()) return;
-        
-        this->create_new_from_picker(cur_picker_id, name);
-        
-        made_new_changes = true;
-        
-        set_textbox_text(this->frm_picker, "txt_text", "");
-    };
-    frm_picker->widgets["but_new"]->description =
-        "Create a new one with the name on the textbox.";
-        
-    frm_picker->widgets["frm_list"]->mouse_wheel_handler =
-    [this] (lafi::widget*, int dy, int) {
-        lafi::scrollbar* s =
-            (lafi::scrollbar*)
-            this->frm_picker->widgets["bar_scroll"];
-        if(s->widgets.find("but_bar") != s->widgets.end()) {
-            s->move_button(
-                0,
-                (s->widgets["but_bar"]->y1 + s->widgets["but_bar"]->y2) /
-                2 - 30 * dy
-            );
-        }
-    };
-    
-}
-
-
-/* ----------------------------------------------------------------------------
- * Creates the status bar.
- */
-void editor::create_status_bar() {
-    lbl_status_bar =
-        new lafi::label(0, canvas_br.y, canvas_br.x, scr_h, "", 0, true);
-    gui->add("lbl_status_bar", lbl_status_bar);
-}
-
-
-/* ----------------------------------------------------------------------------
- * Creates the toolbar frame.
- */
-void editor::create_toolbar_frame() {
-    frm_toolbar =
-        new lafi::frame(0, 0, canvas_br.x, canvas_tl.y);
-    gui->add("frm_toolbar", frm_toolbar);
-    frm_toolbar->solid_color_only = true;
+void editor::close_top_dialog() {
+    if(dialogs.empty()) return;
+    dialogs.back()->is_open = false;
 }
 
 
@@ -257,7 +146,7 @@ void editor::create_toolbar_frame() {
  * be run after the editor's own logic code.
  */
 void editor::do_logic_post() {
-    fade_mgr.tick(delta_t);
+    game.fade_mgr.tick(game.delta_t);
 }
 
 
@@ -266,17 +155,95 @@ void editor::do_logic_post() {
  * be run before the editor's own logic code.
  */
 void editor::do_logic_pre() {
-    gui->tick(delta_t);
-    
-    update_transformations();
-    
     if(double_click_time > 0) {
-        double_click_time -= delta_t;
+        double_click_time -= game.delta_t;
         if(double_click_time < 0) double_click_time = 0;
     }
     
-    unsaved_changes_warning_timer.tick(delta_t);
-    status_override_timer.tick(delta_t);
+    game.cam.tick(game.delta_t);
+    
+    unsaved_changes_warning_timer.tick(game.delta_t);
+    
+    update_transformations();
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Draws the grid, using the current game camera.
+ * interval:
+ *   Interval between grid lines.
+ * major_color:
+ *   Color to use for major lines. These are lines that happen at major
+ *   milestones (i.e. twice the interval).
+ * minor_color:
+ *   Color to use for minor lines. These are lines that aren't major.
+ */
+void editor::draw_grid(
+    const float interval,
+    const ALLEGRO_COLOR &major_color, const ALLEGRO_COLOR &minor_color
+) {
+    point cam_top_left_corner(0, 0);
+    point cam_bottom_right_corner(canvas_br.x, canvas_br.y);
+    al_transform_coordinates(
+        &game.screen_to_world_transform,
+        &cam_top_left_corner.x, &cam_top_left_corner.y
+    );
+    al_transform_coordinates(
+        &game.screen_to_world_transform,
+        &cam_bottom_right_corner.x, &cam_bottom_right_corner.y
+    );
+    
+    float x = floor(cam_top_left_corner.x / interval) * interval;
+    while(x < cam_bottom_right_corner.x + interval) {
+        ALLEGRO_COLOR c = minor_color;
+        bool draw_line = true;
+        
+        if(fmod(x, interval * 2) == 0) {
+            c = major_color;
+            if((interval * 2) * game.cam.zoom <= 6) {
+                draw_line = false;
+            }
+        } else {
+            if(interval * game.cam.zoom <= 6) {
+                draw_line = false;
+            }
+        }
+        
+        if(draw_line) {
+            al_draw_line(
+                x, cam_top_left_corner.y,
+                x, cam_bottom_right_corner.y + interval,
+                c, 1.0f / game.cam.zoom
+            );
+        }
+        x += interval;
+    }
+    
+    float y = floor(cam_top_left_corner.y / interval) * interval;
+    while(y < cam_bottom_right_corner.y + interval) {
+        ALLEGRO_COLOR c = minor_color;
+        bool draw_line = true;
+        
+        if(fmod(y, interval * 2) == 0) {
+            c = major_color;
+            if((interval * 2) * game.cam.zoom <= 6) {
+                draw_line = false;
+            }
+        } else {
+            if(interval * game.cam.zoom <= 6) {
+                draw_line = false;
+            }
+        }
+        
+        if(draw_line) {
+            al_draw_line(
+                cam_top_left_corner.x, y,
+                cam_bottom_right_corner.x + interval, y,
+                c, 1.0f / game.cam.zoom
+            );
+        }
+        y += interval;
+    }
 }
 
 
@@ -290,7 +257,7 @@ void editor::draw_unsaved_changes_warning() {
     ALLEGRO_COLOR back_color = al_map_rgba(192, 192, 64, r * 255);
     ALLEGRO_COLOR outline_color = al_map_rgba(80, 80, 16, r * 255);
     ALLEGRO_COLOR text_color = al_map_rgba(0, 0, 0, r * 255);
-    bool spike_up = unsaved_changes_warning_pos.y < scr_h / 2.0;
+    bool spike_up = unsaved_changes_warning_pos.y < game.win_h / 2.0;
     
     point box_center = unsaved_changes_warning_pos;
     if(unsaved_changes_warning_pos.x < UNSAVED_CHANGES_WARNING_WIDTH / 2.0) {
@@ -298,11 +265,11 @@ void editor::draw_unsaved_changes_warning() {
             UNSAVED_CHANGES_WARNING_WIDTH / 2.0 - unsaved_changes_warning_pos.x;
     } else if(
         unsaved_changes_warning_pos.x >
-        scr_w - UNSAVED_CHANGES_WARNING_WIDTH / 2.0
+        game.win_w - UNSAVED_CHANGES_WARNING_WIDTH / 2.0
     ) {
         box_center.x -=
             unsaved_changes_warning_pos.x -
-            (scr_w - UNSAVED_CHANGES_WARNING_WIDTH / 2.0);
+            (game.win_w - UNSAVED_CHANGES_WARNING_WIDTH / 2.0);
     }
     if(spike_up) {
         box_center.y += UNSAVED_CHANGES_WARNING_HEIGHT / 2.0;
@@ -360,7 +327,7 @@ void editor::draw_unsaved_changes_warning() {
         outline_color, 2
     );
     draw_text_lines(
-        gui->style->text_font, text_color,
+        game.fonts.builtin, text_color,
         box_center, ALLEGRO_ALIGN_CENTER, 1,
         "You have\nunsaved changes!"
     );
@@ -368,71 +335,35 @@ void editor::draw_unsaved_changes_warning() {
 
 
 /* ----------------------------------------------------------------------------
- * Emits a message onto the status bar, and keeps it there for some seconds.
- * text:      Message text.
- * important: If true, the message stays for a few more seconds than normal.
+ * Sets up logic to focus on the next input widget, if it is one of the
+ * input widgets with logic to focus on it.
  */
-void editor::emit_status_bar_message(
-    const string &text, const bool important
-) {
-    status_override_text = text;
-    status_override_timer.start(
-        important ?
-        STATUS_OVERRIDE_IMPORTANT_DURATION :
-        STATUS_OVERRIDE_UNIMPORTANT_DURATION
-    );
-    lbl_status_bar->text = status_override_text;
+void editor::focus_next_special_input() {
+    special_input_focus_controller = 2;
 }
 
 
 /* ----------------------------------------------------------------------------
- * Populates and opens the frame where you pick from a list.
- * picker_id:    ID of the picker that is being generated.
- * elements:     List of elements to populate the picker with. This is a list
- *   of string+string pairs, where the first element is the
- *   category name (optional), and the second is the name
- *   of the element proper.
- * title:        Title of the picker, to place above the list. This is normally
- *   a request to the user, like "Pick an area.".
- * can_make_new: If true, the user can create a new element, by writing its
- *   name on the textbox, and pressing the "+" button.
+ * Returns the position of the last widget, in screen coordinates.
  */
-void editor::generate_and_open_picker(
-    const size_t picker_id, const vector<pair<string, string> > &elements,
-    const string &title, const bool can_make_new
-) {
-
-    cur_picker_id = picker_id;
-    
-    hide_all_frames();
-    frm_picker->show();
-    frm_toolbar->hide();
-    
-    set_label_text(frm_picker, "lbl_title", title);
-    set_textbox_text(frm_picker, "txt_text", "");
-    
-    if(can_make_new) {
-        ((lafi::textbox*) frm_picker->widgets["txt_text"])->placeholder =
-            "(enter search term / new name)";
-        enable_widget(frm_picker->widgets["but_new"]);
-    } else {
-        ((lafi::textbox*) frm_picker->widgets["txt_text"])->placeholder =
-            "(enter search term)";
-        disable_widget(frm_picker->widgets["but_new"]);
-    }
-    
-    picker_elements = elements;
-    populate_picker("");
+point editor::get_last_widget_pos() {
+    return
+        point(
+            ImGui::GetItemRectMin().x + ImGui::GetItemRectSize().x / 2.0,
+            ImGui::GetItemRectMin().y + ImGui::GetItemRectSize().y / 2.0
+        );
 }
 
 
 /* ----------------------------------------------------------------------------
  * Handles an Allegro event for control-related things.
+ * ev:
+ *   Event to handle.
  */
-void editor::handle_controls(const ALLEGRO_EVENT &ev) {
-    if(fade_mgr.is_fading()) return;
+void editor::handle_allegro_event(ALLEGRO_EVENT &ev) {
+    if(game.fade_mgr.is_fading()) return;
     
-    gui->handle_event(ev);
+    ImGui_ImplAllegro5_ProcessEvent(&ev);
     
     if(
         ev.type == ALLEGRO_EVENT_MOUSE_AXES ||
@@ -445,41 +376,58 @@ void editor::handle_controls(const ALLEGRO_EVENT &ev) {
     
     if(
         ev.type == ALLEGRO_EVENT_MOUSE_BUTTON_DOWN &&
-        !is_mouse_in_gui(mouse_cursor_s)
+        !is_mouse_in_gui
     ) {
     
-        if(ev.mouse.button == 1) {
-            holding_m1 = true;
-        } else if(ev.mouse.button == 2) {
-            holding_m2 = true;
-        } else if(ev.mouse.button == 3) {
-            holding_m3 = true;
+        switch (ev.mouse.button) {
+        case 1: {
+            is_m1_pressed = true;
+            break;
+        } case 2: {
+            is_m2_pressed = true;
+            break;
+        } case 3: {
+            is_m3_pressed = true;
+            break;
+        }
         }
         
         mouse_drag_start = point(ev.mouse.x, ev.mouse.y);
         mouse_drag_confirmed = false;
         
-        gui->lose_focus();
-        is_gui_focused = false;
+        if(ev.mouse.button == 1) {
+            is_gui_focused = false;
+        }
         
         if(ev.mouse.button == last_mouse_click && double_click_time > 0) {
-            if(ev.mouse.button == 1) {
+            switch(ev.mouse.button) {
+            case 1: {
+        
                 handle_lmb_double_click(ev);
-            } else if(ev.mouse.button == 2) {
+                break;
+            } case 2: {
                 handle_rmb_double_click(ev);
-            } else if(ev.mouse.button == 3) {
+                break;
+            } case 3: {
                 handle_mmb_double_click(ev);
+                break;
+            }
             }
             
             double_click_time = 0;
             
         } else {
-            if(ev.mouse.button == 1) {
+            switch(ev.mouse.button) {
+            case 1: {
                 handle_lmb_down(ev);
-            } else if(ev.mouse.button == 2) {
+                break;
+            } case 2: {
                 handle_rmb_down(ev);
-            } else if(ev.mouse.button == 3) {
+                break;
+            } case 3: {
                 handle_mmb_down(ev);
+                break;
+            }
             }
             
             last_mouse_click = ev.mouse.button;
@@ -489,22 +437,27 @@ void editor::handle_controls(const ALLEGRO_EVENT &ev) {
         
     } else if(
         ev.type == ALLEGRO_EVENT_MOUSE_BUTTON_DOWN &&
-        is_mouse_in_gui(mouse_cursor_s)
+        is_mouse_in_gui
     ) {
         is_gui_focused = true;
         
     } else if(
         ev.type == ALLEGRO_EVENT_MOUSE_BUTTON_UP
     ) {
-        if(ev.mouse.button == 1) {
-            holding_m1 = false;
+        switch(ev.mouse.button) {
+        case 1: {
+            is_m1_pressed = false;
             handle_lmb_up(ev);
-        } else if(ev.mouse.button == 2) {
-            holding_m2 = false;
+            break;
+        } case 2: {
+            is_m2_pressed = false;
             handle_rmb_up(ev);
-        } else if(ev.mouse.button == 3) {
-            holding_m3 = false;
+            break;
+        } case 3: {
+            is_m3_pressed = false;
             handle_mmb_up(ev);
+            break;
+        }
         }
         
     } else if(
@@ -513,27 +466,27 @@ void editor::handle_controls(const ALLEGRO_EVENT &ev) {
     ) {
         if(
             fabs(ev.mouse.x - mouse_drag_start.x) >=
-            editor_mouse_drag_threshold ||
+            game.options.editor_mouse_drag_threshold ||
             fabs(ev.mouse.y - mouse_drag_start.y) >=
-            editor_mouse_drag_threshold
+            game.options.editor_mouse_drag_threshold
         ) {
             mouse_drag_confirmed = true;
         }
         
         if(mouse_drag_confirmed) {
-            if(holding_m1) {
+            if(is_m1_pressed) {
                 handle_lmb_drag(ev);
             }
-            if(holding_m2) {
+            if(is_m2_pressed) {
                 handle_rmb_drag(ev);
             }
-            if(holding_m3) {
+            if(is_m3_pressed) {
                 handle_mmb_drag(ev);
             }
         }
         if(
             (ev.mouse.dz != 0 || ev.mouse.dw != 0) &&
-            !is_mouse_in_gui(mouse_cursor_s)
+            !is_mouse_in_gui
         ) {
             handle_mouse_wheel(ev);
         }
@@ -560,10 +513,10 @@ void editor::handle_controls(const ALLEGRO_EVENT &ev) {
         }
         
         if(
-            !(frm_picker->flags & lafi::FLAG_INVISIBLE) &&
-            ev.keyboard.keycode == ALLEGRO_KEY_ESCAPE
+            ev.keyboard.keycode == ALLEGRO_KEY_ESCAPE &&
+            !dialogs.empty()
         ) {
-            frm_picker->widgets["but_back"]->simulate_click();
+            close_top_dialog();
         }
         
     } else if(ev.type == ALLEGRO_EVENT_KEY_UP) {
@@ -597,113 +550,247 @@ void editor::handle_controls(const ALLEGRO_EVENT &ev) {
 }
 
 
-//Input handler functions.
+/* ----------------------------------------------------------------------------
+ * Placeholder for handling a key being "char-typed" anywhere.
+ * ev:
+ *   Event to process.
+ */
 void editor::handle_key_char_anywhere(const ALLEGRO_EVENT &ev) {}
+
+
+/* ----------------------------------------------------------------------------
+ * Placeholder for handling a key being "char-typed" in the canvas.
+ * ev:
+ *   Event to process.
+ */
 void editor::handle_key_char_canvas(const ALLEGRO_EVENT &ev) {}
+
+
+/* ----------------------------------------------------------------------------
+ * Placeholder for handling a key being pressed down anywhere.
+ * ev:
+ *   Event to process.
+ */
 void editor::handle_key_down_anywhere(const ALLEGRO_EVENT &ev) {}
+
+
+/* ----------------------------------------------------------------------------
+ * Placeholder for handling a key being pressed down in the canvas.
+ * ev:
+ *   Event to process.
+ */
 void editor::handle_key_down_canvas(const ALLEGRO_EVENT &ev) {}
+
+
+/* ----------------------------------------------------------------------------
+ * Placeholder for handling a key being released anywhere.
+ * ev:
+ *   Event to process.
+ */
 void editor::handle_key_up_anywhere(const ALLEGRO_EVENT &ev) {}
+
+
+/* ----------------------------------------------------------------------------
+ * Placeholder for handling a key being released in the canvas.
+ * ev:
+ *   Event to process.
+ */
 void editor::handle_key_up_canvas(const ALLEGRO_EVENT &ev) {}
+
+
+/* ----------------------------------------------------------------------------
+ * Placeholder for handling the left mouse button being double-clicked
+ * in the canvas.
+ * ev:
+ *   Event to process.
+ */
 void editor::handle_lmb_double_click(const ALLEGRO_EVENT &ev) {}
+
+
+/* ----------------------------------------------------------------------------
+ * Placeholder for handling the left mouse button being pressed down
+ * in the canvas.
+ * ev:
+ *   Event to process.
+ */
 void editor::handle_lmb_down(const ALLEGRO_EVENT &ev) {}
+
+
+/* ----------------------------------------------------------------------------
+ * Placeholder for handling the left mouse button being dragged
+ * in the canvas.
+ * ev:
+ *   Event to process.
+ */
 void editor::handle_lmb_drag(const ALLEGRO_EVENT &ev) {}
+
+
+/* ----------------------------------------------------------------------------
+ * Placeholder for handling the left mouse button released
+ * in the canvas.
+ * ev:
+ *   Event to process.
+ */
 void editor::handle_lmb_up(const ALLEGRO_EVENT &ev) {}
+
+
+/* ----------------------------------------------------------------------------
+ * Placeholder for handling the middle mouse button being double-clicked
+ * in the canvas.
+ * ev:
+ *   Event to process.
+ */
 void editor::handle_mmb_double_click(const ALLEGRO_EVENT &ev) {}
+
+
+/* ----------------------------------------------------------------------------
+ * Placeholder for handling the middle mouse button being pressed down
+ * in the canvas.
+ * ev:
+ *   Event to process.
+ */
 void editor::handle_mmb_down(const ALLEGRO_EVENT &ev) {}
+
+
+/* ----------------------------------------------------------------------------
+ * Placeholder for handling the middle mouse button being dragged
+ * in the canvas.
+ * ev:
+ *   Event to process.
+ */
 void editor::handle_mmb_drag(const ALLEGRO_EVENT &ev) {}
+
+
+/* ----------------------------------------------------------------------------
+ * Placeholder for handling the middle mouse button being released
+ * in the canvas.
+ * ev:
+ *   Event to process.
+ */
 void editor::handle_mmb_up(const ALLEGRO_EVENT &ev) {}
+
+
+/* ----------------------------------------------------------------------------
+ * Placeholder for handling the mouse coordinates being updated.
+ * ev:
+ *   Event to process.
+ */
 void editor::handle_mouse_update(const ALLEGRO_EVENT &ev) {}
+
+
+/* ----------------------------------------------------------------------------
+ * Placeholder for handling the mouse wheel being turned in the canvas.
+ * ev:
+ *   Event to process.
+ */
 void editor::handle_mouse_wheel(const ALLEGRO_EVENT &ev) {}
+
+
+/* ----------------------------------------------------------------------------
+ * Placeholder for handling the right mouse button being double-clicked
+ * in the canvas.
+ * ev:
+ *   Event to process.
+ */
 void editor::handle_rmb_double_click(const ALLEGRO_EVENT &ev) {}
+
+
+/* ----------------------------------------------------------------------------
+ * Placeholder for handling the right mouse button being pressed down
+ * in the canvas.
+ * ev:
+ *   Event to process.
+ */
 void editor::handle_rmb_down(const ALLEGRO_EVENT &ev) {}
+
+
+/* ----------------------------------------------------------------------------
+ * Placeholder for handling the right mouse button being dragged
+ * in the canvas.
+ * ev:
+ *   Event to process.
+ */
 void editor::handle_rmb_drag(const ALLEGRO_EVENT &ev) {}
+
+
+/* ----------------------------------------------------------------------------
+ * Placeholder for handling the right mouse button being released
+ * in the canvas.
+ * ev:
+ *   Event to process.
+ */
 void editor::handle_rmb_up(const ALLEGRO_EVENT &ev) {}
 
-//LAFI helper functions.
-float editor::get_angle_picker_angle(
-    lafi::widget* parent, const string &picker_name
+
+/* ----------------------------------------------------------------------------
+ * Displays a popup, if applicable, and fills it with a text input for the
+ * user to type something in.
+ * Returns true if the user pressed Return or the Ok button.
+ * label:
+ *   Name of the popup.
+ * prompt:
+ *   What to prompt to the user. e.g.: "New name:"
+ * text:
+ *   Pointer to the starting text, as well as the user's final text.
+ */
+bool editor::input_popup(
+    const char* label, const char* prompt, string* text
 ) {
-    return
-        ((lafi::angle_picker*) parent->widgets[picker_name])->get_angle_rads();
-}
-string editor::get_button_text(
-    lafi::widget* parent, const string &button_name
-) {
-    return
-        ((lafi::button*) parent->widgets[button_name])->text;
-}
-bool editor::get_checkbox_check(
-    lafi::widget* parent, const string &checkbox_name
-) {
-    return
-        ((lafi::checkbox*) parent->widgets[checkbox_name])->checked;
-}
-string editor::get_label_text(
-    lafi::widget* parent, const string &label_name
-) {
-    return
-        ((lafi::label*) parent->widgets[label_name])->text;
-}
-string editor::get_textbox_text(
-    lafi::widget* parent, const string &textbox_name
-) {
-    return
-        ((lafi::textbox*) parent->widgets[textbox_name])->text;
-}
-bool editor::get_radio_selection(
-    lafi::widget* parent, const string &radio_name
-) {
-    return
-        ((lafi::radio_button*) parent->widgets[radio_name])->selected;
-}
-void editor::set_angle_picker_angle(
-    lafi::widget* parent, const string &picker_name, const float angle
-) {
-    ((lafi::angle_picker*) parent->widgets[picker_name])->set_angle_rads(angle);
-}
-void editor::set_button_text(
-    lafi::widget* parent, const string &button_name, const string &text
-) {
-    ((lafi::button*) parent->widgets[button_name])->text = text;
-}
-void editor::set_checkbox_check(
-    lafi::widget* parent, const string &checkbox_name, const bool check
-) {
-    if(check) {
-        ((lafi::checkbox*) parent->widgets[checkbox_name])->check();
-    } else {
-        ((lafi::checkbox*) parent->widgets[checkbox_name])->uncheck();
+    bool ret = false;
+    if(ImGui::BeginPopup(label)) {
+        ImGui::Text("%s", prompt);
+        next_input_needs_special_focus();
+        if(
+            ImGui::InputText(
+                "##inputPopupText", text,
+                ImGuiInputTextFlags_EnterReturnsTrue |
+                ImGuiInputTextFlags_AutoSelectAll
+            )
+        ) {
+            ret = true;
+            ImGui::CloseCurrentPopup();
+        }
+        if(ImGui::Button("Ok")) {
+            ret = true;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if(ImGui::Button("Cancel")) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
     }
-}
-void editor::set_label_text(
-    lafi::widget* parent, const string &label_name, const string &text
-) {
-    ((lafi::label*) parent->widgets[label_name])->text = text;
-}
-void editor::set_textbox_text(
-    lafi::widget* parent, const string &textbox_name, const string &text
-) {
-    ((lafi::textbox*) parent->widgets[textbox_name])->text = text;
-}
-void editor::set_radio_selection(
-    lafi::widget* parent, const string &radio_name, const bool selection
-) {
-    if(selection) {
-        ((lafi::radio_button*) parent->widgets[radio_name])->select();
-    } else {
-        ((lafi::radio_button*) parent->widgets[radio_name])->unselect();
-    }
+    return ret;
 }
 
 
 /* ----------------------------------------------------------------------------
- * Returns whether the mouse cursor is inside the gui or not.
- * The status bar counts as the gui.
+ * Returns whether or not the pressed key corresponds to the specified
+ * key combination. Used for keyboard shortcuts.
+ * pressed_key:
+ *   Key that the user pressed.
+ * match_key:
+ *   Key that must be matched in order to return true.
+ * needs_ctrl:
+ *   If true, only returns true if Ctrl was also pressed.
+ * needs_shift:
+ *   If true, only returns true if Shift was also pressed.
  */
-bool editor::is_mouse_in_gui(const point &mouse_coords) {
-    return
-        mouse_coords.x >= canvas_br.x || mouse_coords.y >= canvas_br.y ||
-        mouse_coords.x <= canvas_tl.x || mouse_coords.y <= canvas_tl.y;
+bool editor::key_check(
+    const int pressed_key, const int match_key,
+    const bool needs_ctrl, const bool needs_shift
+) {
+
+    if(pressed_key != match_key) {
+        return false;
+    }
+    if(needs_ctrl != is_ctrl_pressed) {
+        return false;
+    }
+    if(needs_shift != is_shift_pressed) {
+        return false;
+    }
+    return true;
 }
 
 
@@ -711,14 +798,47 @@ bool editor::is_mouse_in_gui(const point &mouse_coords) {
  * Exits out of the editor, with a fade.
  */
 void editor::leave() {
-    fade_mgr.start_fade(false, [] () {
-        if(area_editor_quick_play_area.empty()) {
-            change_game_state(GAME_STATE_MAIN_MENU);
+    //Save the user's preferred tree node open states.
+    save_options();
+    
+    game.fade_mgr.start_fade(false, [] () {
+        if(game.states.area_editor_st->quick_play_area.empty()) {
+            game.change_state(game.states.main_menu_st);
         } else {
-            area_to_load = area_editor_quick_play_area;
-            change_game_state(GAME_STATE_GAME);
+            game.states.gameplay_st->area_to_load =
+                game.states.area_editor_st->quick_play_area;
+            game.change_state(game.states.gameplay_st);
         }
     });
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Displays a popup, if applicable, and fills it with selectable items
+ * from a list. Returns true if one of the items was clicked on,
+ * false otherwise.
+ * label:
+ *   Name of the popup.
+ * items:
+ *   List of items.
+ * picked_item:
+ *   If an item was picked, set this to its name.
+ */
+bool editor::list_popup(
+    const char* label, const vector<string> &items, string* picked_item
+) {
+    bool ret = false;
+    if(ImGui::BeginPopup(label)) {
+        for(size_t i = 0; i < items.size(); ++i) {
+            string name = items[i];
+            if(ImGui::Selectable(name.c_str())) {
+                *picked_item = name;
+                ret = true;
+            }
+        }
+        ImGui::EndPopup();
+    }
+    return ret;
 }
 
 
@@ -727,7 +847,7 @@ void editor::leave() {
  */
 void editor::load() {
     bmp_editor_icons =
-        load_bmp(asset_file_names.editor_icons, NULL, true, false);
+        load_bmp(game.asset_file_names.editor_icons, NULL, true, false);
     if(bmp_editor_icons) {
         for(size_t i = 0; i < N_EDITOR_ICONS; ++i) {
             editor_icons[i] =
@@ -738,63 +858,389 @@ void editor::load() {
                 );
         }
     }
+    
+    game.fade_mgr.start_fade(true, nullptr);
+    
+    //Load the user's preferred tree node open states.
+    load_options();
 }
 
 
 /* ----------------------------------------------------------------------------
- * Populates the picker frame with the elements of the list that match
- * the specified filter.
+ * The next input widget requires special focus logic.
+ * It will only be focused on if focus_next_special_input() was called.
  */
-void editor::populate_picker(const string &filter) {
-    lafi::widget* f = frm_picker->widgets["frm_list"];
-    string prev_category = "";
-    string filter_lc = str_to_lower(filter);
+void editor::next_input_needs_special_focus() {
+    //In order to focus on the InputText when the input popup is
+    //opened, we need to call SetKeyboardFocusHere two frames in
+    //a row. I'm not quite sure why, but it's likely the same as
+    //this: https://github.com/ocornut/imgui/issues/343
+    if(special_input_focus_controller > 0) {
+        ImGui::SetKeyboardFocusHere();
+        special_input_focus_controller--;
+    }
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Opens a dialog.
+ * title:
+ *   Title of the dialog window. This is normally a request to the user,
+ *   like "Pick an area.".
+ * process_callback:
+ *   A function to call when it's time to process the contents inside
+ *   the dialog.
+ */
+void editor::open_dialog(
+    const string &title,
+    const std::function<void()> &process_callback
+) {
+    dialog_info* new_dialog = new dialog_info();
     
-    //Remove everything in the list so it can be re-populated.
-    while(!f->widgets.empty()) {
-        f->remove(f->widgets.begin()->first);
+    new_dialog->title = title;
+    new_dialog->process_callback = process_callback;
+    
+    dialogs.push_back(new_dialog);
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Opens a picker dialog with the given content.
+ * title:
+ *   Title of the picker's dialog window. This is normally
+ *   a request to the user, like "Pick an area.".
+ * items:
+ *   List of items to populate the picker with.
+ * pick_callback:
+ *   A function to call when the user clicks an item or enters a new one.
+ *   This function's first argument is the name of the item.
+ *   Its second argument is the category of the item, or an empty string.
+ *   Its third argument is whether it's a new item or not.
+ * list_header:
+ *   If not-empty, display this text above the list.
+ * can_make_new:
+ *   If true, the user can create a new element, by writing its
+ *   name on the textbox, and pressing the "+" button.
+ * filter:
+ *   Filter of names. Only items that match this will appear.
+ */
+void editor::open_picker(
+    const string &title,
+    const vector<picker_item> &items,
+    const std::function <void(
+        const string &, const string &, const bool
+    )> &pick_callback,
+    const string &list_header,
+    const bool can_make_new,
+    const string &filter
+) {
+    picker_info* new_picker = new picker_info(this);
+    
+    new_picker->title = title;
+    new_picker->process_callback =
+        std::bind(&editor::picker_info::process, new_picker);
+        
+    new_picker->items = items;
+    new_picker->list_header = list_header;
+    new_picker->pick_callback = pick_callback;
+    new_picker->can_make_new = can_make_new;
+    new_picker->filter = filter;
+    
+    focus_next_special_input();
+    
+    dialogs.push_back(new_picker);
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Creates widgets with the goal of placing a disabled text widget to the
+ * right side of the panel.
+ * title:
+ *   Title to write.
+ * width:
+ *   Width to reserve for it.
+ */
+void editor::panel_title(const char* title, const float width) {
+    //Spacer dummy widget.
+    ImGui::SameLine();
+    float size =
+        game.win_w - canvas_separator_x - ImGui::GetItemRectSize().x -
+        width;
+    ImGui::Dummy(ImVec2(size, 0));
+    
+    //Text widget.
+    ImGui::SameLine();
+    ImGui::TextDisabled("%s", title);
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Processes all currently open dialogs for this frame.
+ */
+void editor::process_dialogs() {
+    //Delete closed ones.
+    for(size_t d = 0; d < dialogs.size();) {
+        dialog_info* d_ptr = dialogs[d];
+        
+        if(!d_ptr->is_open) {
+            if(d_ptr->close_callback) {
+                d_ptr->close_callback();
+            }
+            delete d_ptr;
+            dialogs.erase(dialogs.begin() + d);
+        } else {
+            ++d;
+        }
     }
     
-    f->easy_reset();
-    f->easy_row();
+    //Process the latest one.
+    if(!dialogs.empty()) {
+        dialogs.back()->process();
+    }
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Processes the category and type widgets that allow a user to select a mob
+ * type.
+ * cat:
+ *   Pointer to the category reflected in the combo box.
+ * typ:
+ *   Pointer to the type reflected in the combo box.
+ * only_show_area_editor_types:
+ *   If true, object types that cannot appear in the area editor will not
+ *   be included.
+ * category_change_callback:
+ *   If not NULL, this is called as soon as the category combobox is changed.
+ * type_change_callback:
+ *   If not NULL, this is called as soon as the type combobox is changed.
+ */
+void editor::process_mob_type_widgets(
+    mob_category** cat, mob_type** typ,
+    const bool only_show_area_editor_types,
+    const std::function<void()> &category_change_callback,
+    const std::function<void()> &type_change_callback
+) {
+    //Column setup.
+    ImGui::Columns(2, NULL, false);
+    ImGui::SetColumnWidth(-1, 51.0f);
     
-    for(size_t e = 0; e < picker_elements.size(); ++e) {
-        string name = picker_elements[e].second;
-        string lc_name = str_to_lower(name);
-        string category = picker_elements[e].first;
-        
-        if(!filter.empty() && lc_name.find(filter_lc) == string::npos) {
-            //Doesn't match the filter. Skip.
-            continue;
+    //Search button.
+    if(
+        ImGui::ImageButton(
+            editor_icons[ICON_SEARCH],
+            ImVec2(EDITOR_ICON_BMP_SIZE, EDITOR_ICON_BMP_SIZE),
+            ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f),
+            9.0f
+        )
+    ) {
+        vector<picker_item> items;
+        for(unsigned char c = 0; c < N_MOB_CATEGORIES; ++c) {
+            if(c == MOB_CATEGORY_NONE) continue;
+            
+            vector<string> names;
+            mob_category* c_ptr = game.mob_categories.get(c);
+            c_ptr->get_type_names(names);
+            string cat_name = game.mob_categories.get(c)->name;
+            
+            for(size_t n = 0; n < names.size(); ++n) {
+                if(
+                    only_show_area_editor_types &&
+                    !c_ptr->get_type(names[n])->appears_in_area_editor
+                ) {
+                    continue;
+                }
+                items.push_back(picker_item(names[n], cat_name));
+            }
         }
-        
-        if(category != prev_category) {
-            //New category. Create its label.
-            prev_category = category;
-            lafi::label* c =
-                new lafi::label(category + ":", ALLEGRO_ALIGN_LEFT);
-            f->easy_add("lbl_" + i2s(e), c, 100, 16);
-            f->easy_row(0);
-        }
-        
-        //Create the element's button.
-        lafi::button* b = new lafi::button(name);
-        
-        b->left_mouse_click_handler =
-        [name, category, this] (lafi::widget*, int, int) {
-            this->frm_picker->hide();
-            pick(cur_picker_id, name, category);
-        };
-        b->autoscroll = true;
-        
-        f->easy_add("but_" + i2s(e), b, 100, 24);
-        f->easy_row(0);
+        open_picker(
+            "Pick an object type", items,
+            [cat, typ, category_change_callback, type_change_callback]
+        (const string & n, const string & c, const bool) {
+            if(type_change_callback) {
+                type_change_callback();
+            }
+            (*cat) = game.mob_categories.get_from_pname(c);
+            (*typ) = (*cat)->get_type(n);
+        },
+        "", false
+        );
+    }
+    set_tooltip(
+        "Search for an object type from the entire list."
+    );
+    
+    ImGui::NextColumn();
+    
+    //Object category combobox.
+    if(!(*cat)) {
+        *cat = game.mob_categories.get(MOB_CATEGORY_NONE);
     }
     
-    //Make the scrollbar match the new list.
-    (
-        (lafi::scrollbar*) frm_picker->widgets["bar_scroll"]
-    )->make_widget_scroll(f);
+    vector<string> categories;
+    for(size_t c = 0; c < N_MOB_CATEGORIES; ++c) {
+        categories.push_back(game.mob_categories.get(c)->name);
+    }
+    int selected_category_nr = (*cat)->id;
+    
+    if(ImGui::Combo("Category", &selected_category_nr, categories)) {
+        if(category_change_callback) {
+            category_change_callback();
+        }
+        *cat = game.mob_categories.get(selected_category_nr);
+        
+        vector<string> type_names;
+        (*cat)->get_type_names(type_names);
+        
+        *typ = NULL;
+        if(!type_names.empty()) {
+            *typ = (*cat)->get_type(type_names[0]);
+        }
+    }
+    set_tooltip(
+        "What category this object belongs to: a Pikmin, a leader, etc."
+    );
+    
+    if((*cat)->id != MOB_CATEGORY_NONE) {
+    
+        //Object type combobox.
+        vector<string> types;
+        (*cat)->get_type_names(types);
+        for(size_t t = 0; t < types.size(); ) {
+            mob_type* t_ptr = (*cat)->get_type(types[t]);
+            if(only_show_area_editor_types && !t_ptr->appears_in_area_editor) {
+                types.erase(types.begin() + t);
+            } else {
+                ++t;
+            }
+        }
+        
+        string selected_type_name;
+        if(*typ) {
+            selected_type_name = (*typ)->name;
+        }
+        if(ImGui::Combo("Type", &selected_type_name, types)) {
+            if(type_change_callback) {
+                type_change_callback();
+            }
+            *typ = (*cat)->get_type(selected_type_name);
+        }
+        set_tooltip(
+            "The specific type of object this is, from the chosen category."
+        );
+    }
+    
+    ImGui::Columns();
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Process the width and height widgets that allow a user to
+ * specify the size of something.
+ * Returns true if the user changed one of the values.
+ * label:
+ *   Label for the widgets.
+ * size:
+ *   Size variable to alter.
+ * v_speed:
+ *   Variable change speed. Same value you'd pass to ImGui::DragFloat2.
+ *   1.0f for default.
+ * keep_aspect_ratio:
+ *   If true, changing one will change the other in the same ratio.
+ * min_size:
+ *   Minimum value that either width or height is allowed to have.
+ *   Use -FLT_MAX for none.
+ * pre_change_callback:
+ *   Callback to call when the width or height is changed, before it actually
+ *   changes.
+ */
+bool editor::process_size_widgets(
+    const char* label, point &size, const float v_speed,
+    const bool keep_aspect_ratio,
+    const float min_size,
+    const std::function<void()> &pre_change_callback
+) {
+    bool ret = false;
+    point new_size = size;
+    if(
+        ImGui::DragFloat2(label, (float*) &new_size, v_speed)
+    ) {
+        if(pre_change_callback) {
+            pre_change_callback();
+        }
+        
+        if(
+            !keep_aspect_ratio ||
+            size.x == 0.0f || size.y == 0.0f ||
+            new_size.x == 0.0f || new_size.y == 0.0f
+        ) {
+            new_size.x = std::max(min_size, new_size.x);
+            new_size.y = std::max(min_size, new_size.y);
+        } else {
+            float ratio = size.x / size.y;
+            if(new_size.x != size.x) {
+                new_size.x = std::max(min_size * ratio, new_size.x);
+                new_size.x = std::max(min_size, new_size.x);
+                new_size.y = new_size.x / ratio;
+            } else {
+                new_size.x = std::max(min_size / ratio, new_size.y);
+                new_size.y = std::max(min_size, new_size.y);
+                new_size.x = new_size.y * ratio;
+            }
+        }
+        size = new_size;
+        
+        ret = true;
+    }
+    
+    return ret;
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Processes an ImGui::TreeNode, except it pre-emptively opens it or closes it
+ * based on the user's preferences. It also saves the user's preferences as
+ * they open and close the node.
+ * In order for these preferences to be saved onto disk, save_options must
+ * be called.
+ * category:
+ *   Category this node belongs to. This is just a generic term, and
+ *   you likely want to use the panel this node belongs to.
+ * label:
+ *   Label to give to Dear ImGui.
+ */
+bool editor::saveable_tree_node(const string &category, const string &label) {
+    string node_name = get_name() + "/" + category + "/" + label;
+    ImGui::SetNextTreeNodeOpen(game.options.editor_open_nodes[node_name]);
+    bool is_open = ImGui::TreeNode(label.c_str());
+    game.options.editor_open_nodes[node_name] = is_open;
+    return is_open;
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Sets the tooltip of the previous widget.
+ * explanation:
+ *   Text explaining the widget.
+ * shortcut:
+ *   If the widget has a shortcut key, specify its name here.
+ */
+void editor::set_tooltip(const string &explanation, const string &shortcut) {
+    if(!game.options.editor_show_tooltips) {
+        return;
+    }
+    
+    if(ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::Text("%s", explanation.c_str());
+        if(!shortcut.empty()) {
+            ImGui::TextColored(
+                ImVec4(0.66f, 0.66f, 0.66f, 1.0f),
+                "Shortcut key: %s", shortcut.c_str()
+            );
+        }
+        ImGui::EndTooltip();
+    }
 }
 
 
@@ -814,51 +1260,6 @@ void editor::unload() {
 
 
 /* ----------------------------------------------------------------------------
- * Updates the variables that hold the canvas's coordinates.
- */
-void editor::update_canvas_coordinates() {
-    canvas_tl.x = 0;
-    canvas_tl.y = 40;
-    canvas_br.x = scr_w * 0.675;
-    canvas_br.y = scr_h - 16;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Updates the status bar.
- */
-void editor::update_status_bar(
-    const bool omit_coordinates, const bool reverse_y_coordinate
-) {
-    string new_text;
-    if(status_override_timer.time_left > 0.0f) {
-        new_text = status_override_text;
-        
-    } else {
-        if(is_mouse_in_gui(mouse_cursor_s)) {
-            lafi::widget* wum =
-                gui->get_widget_under_mouse(mouse_cursor_s.x, mouse_cursor_s.y);
-            if(wum) {
-                new_text = wum->description;
-            }
-        } else if(!loaded_content_yet) {
-            new_text =
-                "(Place the cursor on a widget "
-                "to show information about it here!)";
-        } else if(!omit_coordinates) {
-            new_text =
-                "(" + i2s(mouse_cursor_w.x) + "," +
-                i2s(
-                    reverse_y_coordinate ? -mouse_cursor_w.y : mouse_cursor_w.y
-                ) + ")";
-        }
-    }
-    
-    lbl_status_bar->text = new_text;
-}
-
-
-/* ----------------------------------------------------------------------------
  * Updates the transformations, with the current camera coordinates, zoom, etc.
  */
 void editor::update_transformations() {
@@ -867,136 +1268,469 @@ void editor::update_transformations() {
         (canvas_tl.x + canvas_br.x) / 2.0,
         (canvas_tl.y + canvas_br.y) / 2.0
     );
-    world_to_screen_transform = identity_transform;
+    game.world_to_screen_transform = game.identity_transform;
     al_translate_transform(
-        &world_to_screen_transform,
-        -cam_pos.x + canvas_center.x / cam_zoom,
-        -cam_pos.y + canvas_center.y / cam_zoom
+        &game.world_to_screen_transform,
+        -game.cam.pos.x + canvas_center.x / game.cam.zoom,
+        -game.cam.pos.y + canvas_center.y / game.cam.zoom
     );
-    al_scale_transform(&world_to_screen_transform, cam_zoom, cam_zoom);
+    al_scale_transform(
+        &game.world_to_screen_transform, game.cam.zoom, game.cam.zoom
+    );
     
     //Screen coordinates to world coordinates.
-    screen_to_world_transform = world_to_screen_transform;
-    al_invert_transform(&screen_to_world_transform);
+    game.screen_to_world_transform = game.world_to_screen_transform;
+    al_invert_transform(&game.screen_to_world_transform);
 }
 
 
 /* ----------------------------------------------------------------------------
- * Zooms in or out to a specific amount, optionally keeping the mouse cursor
- * in the same spot.
+ * Zooms to the specified level, keeping the mouse cursor in the same spot.
+ * new_zoom:
+ *   New zoom level.
  */
-void editor::zoom(const float new_zoom, const bool anchor_cursor) {
-    cam_zoom = clamp(new_zoom, zoom_min_level, zoom_max_level);
+void editor::zoom_with_cursor(const float new_zoom) {
+    //Keep a backup of the old mouse coordinates.
+    point old_mouse_pos = game.mouse_cursor_w;
     
-    if(anchor_cursor) {
-        //Keep a backup of the old mouse coordinates.
-        point old_mouse_pos = mouse_cursor_w;
-        
-        //Figure out where the mouse will be after the zoom.
-        update_transformations();
-        mouse_cursor_w = mouse_cursor_s;
-        al_transform_coordinates(
-            &screen_to_world_transform,
-            &mouse_cursor_w.x, &mouse_cursor_w.y
-        );
-        
-        //Readjust the transformation by shifting the camera
-        //so that the cursor ends up where it was before.
-        cam_pos.x += (old_mouse_pos.x - mouse_cursor_w.x);
-        cam_pos.y += (old_mouse_pos.y - mouse_cursor_w.y);
-    }
-    
+    //Do the zoom.
+    game.cam.set_zoom(clamp(new_zoom, zoom_min_level, zoom_max_level));
     update_transformations();
+    
+    //Figure out where the mouse will be after the zoom.
+    game.mouse_cursor_w = game.mouse_cursor_s;
+    al_transform_coordinates(
+        &game.screen_to_world_transform,
+        &game.mouse_cursor_w.x, &game.mouse_cursor_w.y
+    );
+    
+    //Readjust the transformation by shifting the camera
+    //so that the cursor ends up where it was before.
+    game.cam.set_pos(
+        point(
+            game.cam.pos.x += (old_mouse_pos.x - game.mouse_cursor_w.x),
+            game.cam.pos.y += (old_mouse_pos.y - game.mouse_cursor_w.y)
+        )
+    );
+    
+    //Update the mouse coordinates again.
+    update_transformations();
+    game.mouse_cursor_w = game.mouse_cursor_s;
+    al_transform_coordinates(
+        &game.screen_to_world_transform,
+        &game.mouse_cursor_w.x, &game.mouse_cursor_w.y
+    );
 }
 
 
-const float editor::transformation_controller::HANDLE_RADIUS = 6.0;
-const float editor::transformation_controller::ROTATION_HANDLE_THICKNESS = 8.0;
+/* ----------------------------------------------------------------------------
+ * Creates a new dialog info.
+ */
+editor::dialog_info::dialog_info() :
+    process_callback(nullptr),
+    close_callback(nullptr),
+    is_open(true) {
+    
+}
 
 
 /* ----------------------------------------------------------------------------
- * Creates a transformation controller.
+ * Processes the dialog for this frame.
  */
-editor::transformation_controller::transformation_controller() :
+void editor::dialog_info::process() {
+    if(!is_open) return;
+    
+    ImGui::SetNextWindowPos(
+        ImVec2(game.win_w / 2.0f, game.win_h / 2.0f),
+        ImGuiCond_Always, ImVec2(0.5f, 0.5f)
+    );
+    ImGui::SetNextWindowSize(
+        ImVec2(game.win_w * 0.8, game.win_h * 0.8), ImGuiCond_Once
+    );
+    ImGui::OpenPopup((title + "##dialog").c_str());
+    
+    if(
+        ImGui::BeginPopupModal(
+            (title + "##dialog").c_str(), &is_open
+        )
+    ) {
+    
+        process_callback();
+        
+        ImGui::EndPopup();
+    }
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Creates a new picker info.
+ * editor_ptr:
+ *   Pointer to the editor in charge.
+ */
+editor::picker_info::picker_info(editor* editor_ptr) :
+    editor_ptr(editor_ptr),
+    pick_callback(nullptr),
+    can_make_new(false) {
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Processes the picker dialog for this frame.
+ */
+void editor::picker_info::process() {
+    vector<string> category_names;
+    vector<vector<picker_item> > final_items;
+    string filter_lower = str_to_lower(filter);
+    
+    for(size_t i = 0; i < items.size(); ++i) {
+        if(!filter.empty()) {
+            string name_lower = str_to_lower(items[i].name);
+            if(name_lower.find(filter_lower) == string::npos) {
+                continue;
+            }
+        }
+        
+        size_t cat_index = INVALID;
+        for(size_t c = 0; c < category_names.size(); ++c) {
+            if(category_names[c] == items[i].category) {
+                cat_index = c;
+                break;
+            }
+        }
+        
+        if(cat_index == INVALID) {
+            category_names.push_back(items[i].category);
+            final_items.push_back(vector<picker_item>());
+            cat_index = category_names.size() - 1;
+        }
+        
+        final_items[cat_index].push_back(items[i]);
+    }
+    
+    auto try_make_new = [this] () {
+        if(filter.empty()) return;
+        
+        bool is_really_new = true;
+        for(size_t i = 0; i < items.size(); ++i) {
+            if(filter == items[i].name) {
+                is_really_new = false;
+                break;
+            }
+        }
+        
+        pick_callback(filter, "", is_really_new);
+        is_open = false;
+    };
+    
+    if(can_make_new) {
+        ImGui::PushStyleColor(
+            ImGuiCol_Button, (ImVec4) ImColor(192, 32, 32)
+        );
+        ImGui::PushStyleColor(
+            ImGuiCol_ButtonHovered, (ImVec4) ImColor(208, 48, 48)
+        );
+        ImGui::PushStyleColor
+        (ImGuiCol_ButtonActive, (ImVec4) ImColor(208, 32, 32)
+        );
+        if(ImGui::Button("+", ImVec2(64.0f, 32.0f))) {
+            try_make_new();
+        }
+        ImGui::PopStyleColor(3);
+        ImGui::SameLine();
+    }
+    
+    string filter_widget_hint =
+        can_make_new ?
+        "Search filter or new item name" :
+        "Search filter";
+        
+    editor_ptr->next_input_needs_special_focus();
+    if(
+        ImGui::InputTextWithHint(
+            "##filter", filter_widget_hint.c_str(), &filter,
+            ImGuiInputTextFlags_EnterReturnsTrue
+        )
+    ) {
+        if(can_make_new) {
+            try_make_new();
+        }
+    }
+    
+    if(!list_header.empty()) {
+        ImGui::Text("%s", list_header.c_str());
+    }
+    
+    ImGuiStyle &style = ImGui::GetStyle();
+    float picker_x2 =
+        ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
+        
+    for(size_t c = 0; c < final_items.size(); ++c) {
+    
+        bool show = true;
+        if(!category_names[c].empty()) {
+            ImGui::SetNextTreeNodeOpen(true, ImGuiCond_Once);
+            show = ImGui::TreeNode(category_names[c].c_str());
+        }
+        
+        if(show) {
+            for(size_t i = 0; i < final_items[c].size(); ++i) {
+                picker_item* i_ptr = &final_items[c][i];
+                ImGui::PushID((i2s(c) + "-" + i2s(i)).c_str());
+                
+                ImVec2 button_size;
+                
+                if(i_ptr->bitmap) {
+                
+                    ImGui::BeginGroup();
+                    button_size = ImVec2(160.0f, 160.0f);
+                    if(
+                        ImGui::ImageButton(
+                            (void*) i_ptr->bitmap,
+                            button_size,
+                            ImVec2(0.0f, 0.0f),
+                            ImVec2(1.0f, 1.0f),
+                            4.0f
+                        )
+                    ) {
+                        pick_callback(
+                            i_ptr->name, i_ptr->category, false
+                        );
+                        is_open = false;
+                    }
+                    ImGui::SetNextItemWidth(20.0f);
+                    ImGui::TextWrapped("%s", i_ptr->name.c_str());
+                    ImGui::Dummy(ImVec2(0.0f, 8.0f));
+                    ImGui::EndGroup();
+                    
+                } else {
+                
+                    button_size = ImVec2(168.0f, 32.0f);
+                    if(ImGui::Button(i_ptr->name.c_str(), button_size)) {
+                        pick_callback(
+                            i_ptr->name, i_ptr->category, false
+                        );
+                        is_open = false;
+                    }
+                    
+                }
+                
+                float last_x2 = ImGui::GetItemRectMax().x;
+                float next_x2 = last_x2 + style.ItemSpacing.x + button_size.x;
+                if(i + 1 < final_items[c].size() && next_x2 < picker_x2) {
+                    ImGui::SameLine();
+                }
+                ImGui::PopID();
+            }
+            
+            if(!category_names[c].empty()) {
+                ImGui::TreePop();
+            }
+            
+        }
+    }
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Creates a picker item.
+ * name:
+ *   Name of the item.
+ * category:
+ *   Category it belongs to. If none, use an empty string.
+ * bitmap:
+ *   Bitmap to display on the item. If none, use NULL.
+ */
+editor::picker_item::picker_item(
+    const string &name, const string &category, ALLEGRO_BITMAP* bitmap
+) :
+    name(name),
+    category(category),
+    bitmap(bitmap) {
+    
+}
+
+
+const float editor::transformation_widget::DEF_SIZE = 32.0f;
+const float editor::transformation_widget::HANDLE_RADIUS = 6.0f;
+const float editor::transformation_widget::OUTLINE_THICKNESS = 2.0f;
+const float editor::transformation_widget::ROTATION_HANDLE_THICKNESS = 8.0f;
+
+/* ----------------------------------------------------------------------------
+ * Creates a new transformation widget.
+ */
+editor::transformation_widget::transformation_widget() :
     moving_handle(-1),
-    size(point(16, 16)),
-    angle(0),
-    keep_aspect_ratio(true),
-    allow_rotation(false) {
+    old_angle(0.0f),
+    old_mouse_angle(0.0f) {
     
 }
 
 
 /* ----------------------------------------------------------------------------
- * Draws the transformation (move, scale, rotate) handles.
+ * Draws the widget on-screen.
+ * center:
+ *   Center point.
+ * size:
+ *   Width and height. If NULL, no scale handles will be drawn.
+ * angle:
+ *   Angle. If NULL, the rotation handle will not be drawn.
+ * zoom:
+ *   Zoom the widget's components by this much.
  */
-void editor::transformation_controller::draw_handles() {
-    if(size.x == 0 || size.y == 0) return;
+void editor::transformation_widget::draw(
+    const point* const center, const point* const size,
+    const float* const angle, const float zoom
+) const {
+    if(!center) return;
     
-    //Rotation handle.
-    if(allow_rotation) {
+    point handles[9];
+    float radius;
+    get_locations(center, size, angle, handles, &radius, NULL);
+    
+    //Draw the rotation handle.
+    if(angle && radius >= 0.0f) {
         al_draw_circle(
-            center.x, center.y, radius,
-            al_map_rgb(64, 64, 192), ROTATION_HANDLE_THICKNESS / cam_zoom
+            center->x, center->y, radius,
+            al_map_rgb(64, 64, 192), ROTATION_HANDLE_THICKNESS * zoom
         );
     }
     
-    //Outline.
-    point corners[4];
-    corners[0] = point(-size.x / 2.0, -size.y / 2.0);
-    corners[1] = point(size.x / 2.0, -size.y / 2.0);
-    corners[2] = point(size.x / 2.0, size.y / 2.0);
-    corners[3] = point(-size.x / 2.0, size.y / 2.0);
-    for(unsigned char c = 0; c < 4; ++c) {
-        al_transform_coordinates(
-            &disalign_transform, &corners[c].x, &corners[c].y
-        );
-    }
+    //Draw the outline.
+    point corners[4] = {
+        handles[0],
+        handles[2],
+        handles[8],
+        handles[6],
+    };
     for(unsigned char c = 0; c < 4; ++c) {
         size_t c2 = sum_and_wrap(c, 1, 4);
         al_draw_line(
             corners[c].x, corners[c].y,
             corners[c2].x, corners[c2].y,
-            al_map_rgb(32, 32, 160), 2.0 / cam_zoom
+            al_map_rgb(32, 32, 160), OUTLINE_THICKNESS * zoom
         );
     }
     
-    //Translation and scale handles.
+    //Draw the translation and scale handles.
     for(unsigned char h = 0; h < 9; ++h) {
-        point handle_pos = get_handle_pos(h);
+        if(!size && h != 4) continue;
         al_draw_filled_circle(
-            handle_pos.x, handle_pos.y,
-            HANDLE_RADIUS / cam_zoom, al_map_rgb(96, 96, 224)
+            handles[h].x, handles[h].y,
+            HANDLE_RADIUS * zoom, al_map_rgb(96, 96, 224)
         );
     }
 }
 
 
 /* ----------------------------------------------------------------------------
- * Handles a mouse press, allowing a handle to be grabbed.
- * Returns true if handled, false if nothing was done.
+ * Returns the location of all handles, based on the information it
+ * was fed.
+ * center:
+ *   Center point.
+ * size:
+ *   Width and height. If NULL, the default size is used.
+ * angle:
+ *   Angle. If NULL, zero is used.
+ * handles:
+ *   Return the location of all nine translation and scale handles here.
+ * radius:
+ *   Return the angle handle's radius here.
+ * transform:
+ *   If not NULL, return the transformation used here.
+ *   The transformation will only rotate and translate, not scale.
  */
-bool editor::transformation_controller::handle_mouse_down(const point pos) {
-    if(size.x == 0 || size.y == 0) return false;
+void editor::transformation_widget::get_locations(
+    const point* const center, const point* const size,
+    const float* const angle, point* handles, float* radius,
+    ALLEGRO_TRANSFORM* transform
+) const {
+    point size_to_use(DEF_SIZE, DEF_SIZE);
+    if(size) size_to_use = *size;
+    
+    //First, the Allegro transformation.
+    ALLEGRO_TRANSFORM transform_to_use;
+    al_identity_transform(&transform_to_use);
+    if(angle) {
+        al_rotate_transform(&transform_to_use, *angle);
+    }
+    al_translate_transform(&transform_to_use, center->x, center->y);
+    
+    //Get the coordinates of all translation and scale handles.
+    handles[0] = { -size_to_use.x / 2.0f, -size_to_use.y / 2.0f };
+    handles[1] = { 0.0f,                  -size_to_use.y / 2.0f };
+    handles[2] = { size_to_use.x / 2.0f,  -size_to_use.y / 2.0f };
+    handles[3] = { -size_to_use.x / 2.0f, 0.0f                  };
+    handles[4] = { 0.0f,                  0.0f                  };
+    handles[5] = { size_to_use.x / 2.0f,  0.0f                  };
+    handles[6] = { -size_to_use.x / 2.0f, size_to_use.y / 2.0f  };
+    handles[7] = { 0.0f,                  size_to_use.y / 2.0f  };
+    handles[8] = { size_to_use.x / 2.0f,  size_to_use.y / 2.0f  };
     
     for(unsigned char h = 0; h < 9; ++h) {
-        point handle_pos = get_handle_pos(h);
-        if(dist(handle_pos, pos) <= HANDLE_RADIUS / cam_zoom) {
-            moving_handle = h;
-            pre_move_size = size;
-            return true;
+        al_transform_coordinates(
+            &transform_to_use, &handles[h].x, &handles[h].y
+        );
+    }
+    
+    float diameter = dist(point(), size_to_use).to_float();
+    if(diameter == 0.0f) {
+        *radius = 0.0f;
+    } else {
+        *radius = diameter / 2.0f;
+    }
+    
+    if(transform) *transform = transform_to_use;
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Handles the user having held the left mouse button down.
+ * Returns true if the user did click on a handle.
+ * mouse_coords:
+ *   Mouse coordinates.
+ * center:
+ *   Center point.
+ * size:
+ *   Width and height. If NULL, no scale handling will be performed.
+ * angle:
+ *   Angle. If NULL, no rotation handling will be performed.
+ * zoom:
+ *   Zoom the widget's components by this much.
+ */
+bool editor::transformation_widget::handle_mouse_down(
+    const point &mouse_coords, const point* const center,
+    const point* const size, const float* const angle, const float zoom
+) {
+    if(!center) return false;
+    
+    point handles[9];
+    float radius;
+    get_locations(center, size, angle, handles, &radius, NULL);
+    
+    //Check if the user clicked on a translation or scale handle.
+    for(unsigned char h = 0; h < 9; ++h) {
+        if(dist(handles[h], mouse_coords) <= HANDLE_RADIUS * zoom) {
+            if(h == 4) {
+                moving_handle = h;
+                return true;
+            } else if(size) {
+                moving_handle = h;
+                old_size = *size;
+                return true;
+            }
         }
     }
     
-    if(allow_rotation) {
-        dist d(center, pos);
+    //Check if the user clicked on the rotation handle.
+    if(angle) {
+        dist d(*center, mouse_coords);
         if(
-            d >= radius - ROTATION_HANDLE_THICKNESS / cam_zoom / 2.0 &&
-            d <= radius + ROTATION_HANDLE_THICKNESS / cam_zoom / 2.0
+            d >= radius - ROTATION_HANDLE_THICKNESS / 2.0f * zoom &&
+            d <= radius + ROTATION_HANDLE_THICKNESS / 2.0f * zoom
         ) {
             moving_handle = 9;
-            pre_rotation_angle = angle;
-            pre_rotation_mouse_angle = ::get_angle(center, pos);
+            old_angle = *angle;
+            old_mouse_angle = get_angle(*center, mouse_coords);
             return true;
         }
     }
@@ -1006,323 +1740,177 @@ bool editor::transformation_controller::handle_mouse_down(const point pos) {
 
 
 /* ----------------------------------------------------------------------------
- * Handles a mouse release, allowing a handle to be released.
+ * Handles the user having moved the mouse cursor.
+ * Returns true if the user is dragging a handle.
+ * mouse_coords:
+ *   Mouse coordinates.
+ * center:
+ *   Center point.
+ * size:
+ *   Width and height. If NULL, no scale handling will be performed.
+ * angle:
+ *   Angle. If NULL, no rotation handling will be performed.
+ * zoom:
+ *   Zoom the widget's components by this much.
+ * keep_aspect_ratio:
+ *   If true, aspect ratio is kept when resizing.
+ * min_size:
+ *   Minimum possible size for the width or height. Use -FLT_MAX for none.
  */
-void editor::transformation_controller::handle_mouse_up() {
-    moving_handle = -1;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Handles a mouse move, allowing a handle to be moved.
- * Returns true if handled, false if nothing was done.
- */
-bool editor::transformation_controller::handle_mouse_move(const point pos) {
+bool editor::transformation_widget::handle_mouse_move(
+    const point &mouse_coords, point* center, point* size, float* angle,
+    const float zoom, const bool keep_aspect_ratio, const float min_size
+) {
+    if(!center) return false;
+    
     if(moving_handle == -1) {
         return false;
     }
     
+    //Logic for moving the center handle.
     if(moving_handle == 4) {
-        set_center(pos);
+        *center = mouse_coords;
         return true;
     }
     
-    if(moving_handle == 9) {
-        set_angle(
-            pre_rotation_angle +
-            (::get_angle(center, pos) - pre_rotation_mouse_angle)
-        );
+    //Logic for moving the rotation handle.
+    if(moving_handle == 9 && angle) {
+        *angle =
+            old_angle +
+            get_angle(*center, mouse_coords) - old_mouse_angle;
         return true;
     }
     
-    point aligned_cursor_pos = pos;
-    al_transform_coordinates(
-        &align_transform,
-        &aligned_cursor_pos.x, &aligned_cursor_pos.y
-    );
-    point new_size = pre_move_size;
-    point aligned_new_center = center;
-    al_transform_coordinates(
-        &align_transform,
-        &aligned_new_center.x, &aligned_new_center.y
-    );
-    
-    if(moving_handle == 0 || moving_handle == 3 || moving_handle == 6) {
-        new_size.x = size.x / 2.0 - aligned_cursor_pos.x;
-    } else if(moving_handle == 2 || moving_handle == 5 || moving_handle == 8) {
-        new_size.x = aligned_cursor_pos.x - (-size.x / 2.0);
+    //From here on out, it's logic to move a scale handle.
+    if(!size) {
+        return false;
     }
     
-    if(moving_handle == 0 || moving_handle == 1 || moving_handle == 2) {
-        new_size.y = (size.y / 2.0) - aligned_cursor_pos.y;
-    } else if(moving_handle == 6 || moving_handle == 7 || moving_handle == 8) {
-        new_size.y = aligned_cursor_pos.y - (-size.y / 2.0);
+    ALLEGRO_TRANSFORM t;
+    point handles[9];
+    float radius;
+    get_locations(center, size, angle, handles, &radius, &t);
+    al_invert_transform(&t);
+    
+    point transformed_mouse = mouse_coords;
+    point transformed_center = *center;
+    point new_size = old_size;
+    al_transform_coordinates(&t, &transformed_mouse.x, &transformed_mouse.y);
+    al_transform_coordinates(&t, &transformed_center.x, &transformed_center.y);
+    bool scaling_x = false;
+    bool scaling_y = false;
+    
+    switch(moving_handle) {
+    case 0:
+    case 3:
+    case 6: {
+        new_size.x = size->x / 2.0f - transformed_mouse.x;
+        scaling_x = true;
+        break;
+    } case 2:
+    case 5:
+    case 8: {
+        new_size.x = transformed_mouse.x - (-size->x / 2.0f);
+        scaling_x = true;
+        break;
+    }
     }
     
-    if(keep_aspect_ratio) {
-        if(
-            fabs(pre_move_size.x - new_size.x) >
-            fabs(pre_move_size.y - new_size.y)
-        ) {
-            //Most significant change is width.
-            if(pre_move_size.x != 0) {
-                float ratio = pre_move_size.y / pre_move_size.x;
-                new_size.y = new_size.x * ratio;
-            }
-            
+    switch(moving_handle) {
+    case 0:
+    case 1:
+    case 2: {
+        new_size.y = (size->y / 2.0f) - transformed_mouse.y;
+        scaling_y = true;
+        break;
+    } case 6:
+    case 7:
+    case 8: {
+        new_size.y = transformed_mouse.y - (-size->y / 2.0f);
+        scaling_y = true;
+        break;
+    }
+    }
+    
+    new_size.x = std::max(min_size, new_size.x);
+    new_size.y = std::max(min_size, new_size.y);
+    
+    if(keep_aspect_ratio && old_size.x != 0.0f && old_size.y != 0.0f) {
+        float scale_to_use;
+        float w_scale = new_size.x / old_size.x;
+        float h_scale = new_size.y / old_size.y;
+        if(!scaling_y) {
+            scale_to_use = w_scale;
+        } else if(!scaling_x) {
+            scale_to_use = h_scale;
         } else {
-            //Most significant change is height.
-            if(pre_move_size.y != 0) {
-                float ratio = pre_move_size.x / pre_move_size.y;
-                new_size.x = new_size.y * ratio;
+            if(fabs(w_scale) > fabs(h_scale)) {
+                scale_to_use = w_scale;
+            } else {
+                scale_to_use = h_scale;
             }
-            
         }
+        scale_to_use = std::max(min_size / old_size.x, scale_to_use);
+        scale_to_use = std::max(min_size / old_size.y, scale_to_use);
+        new_size = old_size * scale_to_use;
     }
     
-    if(moving_handle == 0 || moving_handle == 3 || moving_handle == 6) {
-        aligned_new_center.x = (size.x / 2.0) - new_size.x / 2.0;
-    } else if(moving_handle == 2 || moving_handle == 5 || moving_handle == 8) {
-        aligned_new_center.x = (-size.x / 2.0) + new_size.x / 2.0;
+    switch(moving_handle) {
+    case 0:
+    case 3:
+    case 6: {
+        transformed_center.x = (size->x / 2.0f) - new_size.x / 2.0f;
+        break;
+    } case 2:
+    case 5:
+    case 8: {
+        transformed_center.x = (-size->x / 2.0f) + new_size.x / 2.0f;
+        break;
+    }
     }
     
-    if(moving_handle == 0 || moving_handle == 1 || moving_handle == 2) {
-        aligned_new_center.y = (size.y / 2.0) - new_size.y / 2.0;
-    } else if(moving_handle == 6 || moving_handle == 7 || moving_handle == 8) {
-        aligned_new_center.y = (-size.y / 2.0) + new_size.y / 2.0;
+    switch(moving_handle) {
+    case 0:
+    case 1:
+    case 2: {
+        transformed_center.y = (size->y / 2.0f) - new_size.y / 2.0f;
+        break;
+    } case 6:
+    case 7:
+    case 8: {
+        transformed_center.y = (-size->y / 2.0f) + new_size.y / 2.0f;
+        break;
+    }
     }
     
-    point new_center = aligned_new_center;
-    al_transform_coordinates(
-        &disalign_transform,
-        &new_center.x, &new_center.y
-    );
+    point new_center = transformed_center;
+    al_invert_transform(&t);
+    al_transform_coordinates(&t, &new_center.x, &new_center.y);
     
-    set_center(new_center);
-    set_size(new_size);
+    *center = new_center;
+    *size = new_size;
     
     return true;
 }
 
 
 /* ----------------------------------------------------------------------------
- * Returns the center.
+ * Handles the user having released the left mouse button.
+ * Returns true if the user stopped dragging a handle.
  */
-point editor::transformation_controller::get_center() {
-    return center;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Returns the size.
- */
-point editor::transformation_controller::get_size() {
-    return size;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Returns the angle.
- */
-float editor::transformation_controller::get_angle() {
-    return angle;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Sets the center.
- */
-void editor::transformation_controller::set_center(const point &center) {
-    this->center = center;
-    update();
-}
-
-
-/* ----------------------------------------------------------------------------
- * Sets the size.
- */
-void editor::transformation_controller::set_size(const point &size) {
-    this->size = size;
-    update();
-}
-
-
-/* ----------------------------------------------------------------------------
- * Sets the angle.
- */
-void editor::transformation_controller::set_angle(const float angle) {
-    this->angle = angle;
-    update();
-}
-
-
-/* ----------------------------------------------------------------------------
- * Returns the position at which a handle is.
- */
-point editor::transformation_controller::get_handle_pos(
-    const unsigned char handle
-) {
-    point result;
-    if(handle == 0 || handle == 3 || handle == 6) {
-        result.x = -size.x / 2.0;
-    } else if(handle == 2 || handle == 5 || handle == 8) {
-        result.x = size.x / 2.0;
+bool editor::transformation_widget::handle_mouse_up() {
+    if(moving_handle == -1) {
+        return false;
     }
-    if(handle == 0 || handle == 1 || handle == 2) {
-        result.y = -size.y / 2.0;
-    } else if(handle == 6 || handle == 7 || handle == 8) {
-        result.y = size.y / 2.0;
-    }
-    al_transform_coordinates(&disalign_transform, &result.x, &result.y);
-    return result;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Updates the transformations to match the new data, as well as
- * some caches.
- */
-void editor::transformation_controller::update() {
-    al_identity_transform(&align_transform);
-    al_translate_transform(&align_transform, -center.x, -center.y);
-    al_rotate_transform(&align_transform, -angle);
     
-    al_copy_transform(&disalign_transform, &align_transform);
-    al_invert_transform(&disalign_transform);
-    
-    radius = dist(center, center + (size / 2)).to_float();
-}
-
-
-/* ----------------------------------------------------------------------------
- * Adds a new boolean to the list.
- */
-void editor::gui_to_var_helper::register_bool(
-    bool* var, const bool gui_value
-) {
-    bools[var] = gui_value;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Adds a new int to the list.
- */
-void editor::gui_to_var_helper::register_int(
-    int* var, const int gui_value
-) {
-    ints[var] = gui_value;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Adds a new float to the list.
- */
-void editor::gui_to_var_helper::register_float(
-    float* var, const float gui_value
-) {
-    floats[var] = gui_value;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Adds a new unsigned char to the list.
- */
-void editor::gui_to_var_helper::register_uchar(
-    unsigned char* var, const unsigned char gui_value
-) {
-    uchars[var] = gui_value;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Adds a new string to the list.
- */
-void editor::gui_to_var_helper::register_string(
-    string* var, const string &gui_value
-) {
-    strings[var] = gui_value;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Adds a new color to the list.
- */
-void editor::gui_to_var_helper::register_color(
-    ALLEGRO_COLOR* var, const ALLEGRO_COLOR &gui_value
-) {
-    colors[var] = gui_value;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Adds a new point to the list.
- */
-void editor::gui_to_var_helper::register_point(
-    point* var, const point &gui_value
-) {
-    points[var] = gui_value;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Returns true if all registered variables equal the given GUI values.
- */
-bool editor::gui_to_var_helper::all_equal() {
-    for(auto b = bools.begin(); b != bools.end(); ++b) {
-        if(*(b->first) != b->second) return false;
-    }
-    for(auto i = ints.begin(); i != ints.end(); ++i) {
-        if(*(i->first) != i->second) return false;
-    }
-    for(auto f = floats.begin(); f != floats.end(); ++f) {
-        if(*(f->first) != f->second) return false;
-    }
-    for(auto c = uchars.begin(); c != uchars.end(); ++c) {
-        if(*(c->first) != c->second) return false;
-    }
-    for(auto s = strings.begin(); s != strings.end(); ++s) {
-        if(*(s->first) != s->second) return false;
-    }
-    for(auto c = colors.begin(); c != colors.end(); ++c) {
-        if((c->first)->r != c->second.r) return false;
-        if((c->first)->g != c->second.g) return false;
-        if((c->first)->b != c->second.b) return false;
-        if((c->first)->a != c->second.a) return false;
-    }
-    for(auto p = points.begin(); p != points.end(); ++p) {
-        if(*(p->first) != p->second) return false;
-    }
+    moving_handle = -1;
     return true;
 }
 
 
 /* ----------------------------------------------------------------------------
- * Sets all variables to the given GUI values.
+ * Is the user currently moving a handle?
  */
-void editor::gui_to_var_helper::set_all() {
-    for(auto b = bools.begin(); b != bools.end(); ++b) {
-        *(b->first) = b->second;
-    }
-    for(auto i = ints.begin(); i != ints.end(); ++i) {
-        *(i->first) = i->second;
-    }
-    for(auto f = floats.begin(); f != floats.end(); ++f) {
-        *(f->first) = f->second;
-    }
-    for(auto c = uchars.begin(); c != uchars.end(); ++c) {
-        *(c->first) = c->second;
-    }
-    for(auto s = strings.begin(); s != strings.end(); ++s) {
-        *(s->first) = s->second;
-    }
-    for(auto c = colors.begin(); c != colors.end(); ++c) {
-        *(c->first) = c->second;
-    }
-    for(auto p = points.begin(); p != points.end(); ++p) {
-        *(p->first) = p->second;
-    }
+bool editor::transformation_widget::is_moving_handle() {
+    return (moving_handle != -1);
 }
-
-
-//Runs custom code when the user presses the "cancel" button on a picker.
-void editor::custom_picker_cancel_action() { }

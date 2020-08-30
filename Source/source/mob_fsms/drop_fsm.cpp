@@ -17,41 +17,43 @@
 
 /* ----------------------------------------------------------------------------
  * Creates the finite state machine for the drop's logic.
+ * typ:
+ *   Mob type to create the finite state machine for.
  */
 void drop_fsm::create_fsm(mob_type* typ) {
     easy_fsm_creator efc;
     efc.new_state("falling", DROP_STATE_FALLING); {
-        efc.new_event(MOB_EVENT_ON_ENTER); {
+        efc.new_event(MOB_EV_ON_ENTER); {
             efc.run(drop_fsm::set_falling_anim);
         }
-        efc.new_event(MOB_EVENT_LANDED); {
+        efc.new_event(MOB_EV_LANDED); {
             efc.change_state("landing");
         }
     }
     efc.new_state("landing", DROP_STATE_LANDING); {
-        efc.new_event(MOB_EVENT_ON_ENTER); {
+        efc.new_event(MOB_EV_ON_ENTER); {
             efc.run(drop_fsm::land);
         }
-        efc.new_event(MOB_EVENT_ANIMATION_END); {
+        efc.new_event(MOB_EV_ANIMATION_END); {
             efc.change_state("idling");
         }
     }
     efc.new_state("idling", DROP_STATE_IDLING); {
-        efc.new_event(MOB_EVENT_ON_ENTER); {
+        efc.new_event(MOB_EV_ON_ENTER); {
             efc.run(drop_fsm::set_idling_anim);
         }
-        efc.new_event(MOB_EVENT_TOUCHED_OBJECT); {
+        efc.new_event(MOB_EV_TOUCHED_OBJECT); {
             efc.run(drop_fsm::on_touched);
         }
     }
     efc.new_state("bumped", DROP_STATE_BUMPED); {
-        efc.new_event(MOB_EVENT_ON_ENTER); {
+        efc.new_event(MOB_EV_ON_ENTER); {
             efc.run(drop_fsm::set_bumped_anim);
         }
-        efc.new_event(MOB_EVENT_TOUCHED_OBJECT); {
+        efc.new_event(MOB_EV_TOUCHED_OBJECT); {
             efc.run(drop_fsm::on_touched);
         }
-        efc.new_event(MOB_EVENT_ANIMATION_END); {
+        efc.new_event(MOB_EV_ANIMATION_END); {
             efc.change_state("idling");
         }
     }
@@ -71,6 +73,12 @@ void drop_fsm::create_fsm(mob_type* typ) {
 
 /* ----------------------------------------------------------------------------
  * When the drop lands on the floor.
+ * m:
+ *   The mob.
+ * info1:
+ *   Unused.
+ * info2:
+ *   Unused.
  */
 void drop_fsm::land(mob* m, void* info1, void* info2) {
     m->stop_chasing();
@@ -80,6 +88,12 @@ void drop_fsm::land(mob* m, void* info1, void* info2) {
 
 /* ----------------------------------------------------------------------------
  * What to do when the drop is touched.
+ * m:
+ *   The mob.
+ * info1:
+ *   Unused.
+ * info2:
+ *   Unused.
  */
 void drop_fsm::on_touched(mob* m, void* info1, void* info2) {
     drop* d_ptr = (drop*) m;
@@ -97,15 +111,19 @@ void drop_fsm::on_touched(mob* m, void* info1, void* info2) {
         //Pikmin is about to drink it.
         pikmin* p_ptr = (pikmin*) toucher;
         
-        if(
-            d_ptr->dro_type->effect == DROP_EFFECT_MATURATE &&
-            p_ptr->maturity < N_MATURITIES - 1
-        ) {
+        switch(d_ptr->dro_type->effect) {
+        case DROP_EFFECT_MATURATE: {
+            if(p_ptr->maturity < N_MATURITIES - 1) {
+                will_drink = true;
+            }
+            break;
+        } case DROP_EFFECT_GIVE_STATUS: {
             will_drink = true;
-        } else if(d_ptr->dro_type->effect == DROP_EFFECT_GIVE_STATUS) {
-            will_drink = true;
+            break;
+        } default: {
+            break;
         }
-        
+        }
         
     } else if(
         d_ptr->dro_type->consumer == DROP_CONSUMER_LEADERS &&
@@ -113,10 +131,14 @@ void drop_fsm::on_touched(mob* m, void* info1, void* info2) {
     ) {
     
         //Leader is about to drink it.
-        if(d_ptr->dro_type->effect == DROP_EFFECT_INCREASE_SPRAYS) {
+        switch(d_ptr->dro_type->effect) {
+        case DROP_EFFECT_INCREASE_SPRAYS:
+        case DROP_EFFECT_GIVE_STATUS: {
             will_drink = true;
-        } else if(d_ptr->dro_type->effect == DROP_EFFECT_GIVE_STATUS) {
-            will_drink = true;
+            break;
+        } default: {
+            break;
+        }
         }
         
     }
@@ -124,7 +146,7 @@ void drop_fsm::on_touched(mob* m, void* info1, void* info2) {
     mob_event* ev = NULL;
     
     if(will_drink) {
-        ev = q_get_event(toucher, MOB_EVENT_TOUCHED_DROP);
+        ev = q_get_event(toucher, MOB_EV_TOUCHED_DROP);
     }
     
     if(!ev) {
@@ -146,6 +168,12 @@ void drop_fsm::on_touched(mob* m, void* info1, void* info2) {
 
 /* ----------------------------------------------------------------------------
  * Sets the animation to the "bumped" one.
+ * m:
+ *   The mob.
+ * info1:
+ *   Unused.
+ * info2:
+ *   Unused.
  */
 void drop_fsm::set_bumped_anim(mob* m, void* info1, void* info2) {
     m->set_animation(DROP_ANIM_BUMPED);
@@ -154,6 +182,12 @@ void drop_fsm::set_bumped_anim(mob* m, void* info1, void* info2) {
 
 /* ----------------------------------------------------------------------------
  * Sets the animation to the "falling" one.
+ * m:
+ *   The mob.
+ * info1:
+ *   Unused.
+ * info2:
+ *   Unused.
  */
 void drop_fsm::set_falling_anim(mob* m, void* info1, void* info2) {
     m->set_animation(DROP_ANIM_FALLING);
@@ -162,6 +196,12 @@ void drop_fsm::set_falling_anim(mob* m, void* info1, void* info2) {
 
 /* ----------------------------------------------------------------------------
  * Sets the standard "idling" animation.
+ * m:
+ *   The mob.
+ * info1:
+ *   Unused.
+ * info2:
+ *   Unused.
  */
 void drop_fsm::set_idling_anim(mob* m, void* info1, void* info2) {
     m->set_animation(DROP_ANIM_IDLING);

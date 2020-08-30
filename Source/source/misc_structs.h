@@ -18,15 +18,84 @@
 
 #include <allegro5/allegro.h>
 #include <allegro5/allegro_audio.h>
+#include <allegro5/allegro_font.h>
 
-#include "data_file.h"
+#include "animation.h"
 #include "mob_categories/mob_category.h"
 #include "particle.h"
+#include "utils/data_file.h"
 #include "utils/geometry_utils.h"
+
 
 class pikmin_type;
 
-using namespace std;
+using std::map;
+using std::size_t;
+using std::string;
+using std::vector;
+
+
+/* ----------------------------------------------------------------------------
+ * List of file names of system assets.
+ */
+struct asset_file_names_struct {
+    string area_name_font;
+    string checkbox_check;
+    string cursor;
+    string cursor_invalid;
+    string counter_font;
+    string editor_icons;
+    string enemy_spirit;
+    string icon;
+    string idle_glow;
+    string main_font;
+    string main_menu;
+    string mouse_button_icon[3];
+    string mouse_cursor;
+    string mouse_wd_icon;
+    string mouse_wu_icon;
+    string notification;
+    string pikmin_silhouette;
+    string pikmin_spirit;
+    string rock;
+    string shadow;
+    string smack;
+    string smoke;
+    string sparkle;
+    string spotlight;
+    string swarm_arrow;
+    string value_font;
+    string wave_ring;
+    
+    void load(data_node* file);
+    
+    asset_file_names_struct();
+};
+
+
+/* ----------------------------------------------------------------------------
+ * Information about the game camera. Where it is, where it wants to go, etc.
+ */
+struct camera_info {
+    //Top-left and bottom-right world coordinates that this camera can see.
+    point box[2];
+    //Current position.
+    point pos;
+    //Position it wants to be at.
+    point target_pos;
+    //Zoom it wants to be at.
+    float target_zoom;
+    //Current zoom.
+    float zoom;
+    
+    void set_pos(const point &new_pos);
+    void set_zoom(const float new_zoom);
+    void tick(const float delta_t);
+    void update_box();
+    
+    camera_info();
+};
+
 
 /* ----------------------------------------------------------------------------
  * A timer. You can set it to start at a pre-determined time, to tick, etc.
@@ -34,17 +103,67 @@ using namespace std;
 struct timer {
     float time_left; //How much time is left until 0.
     float duration;  //When the timer starts, its time is set to this.
-    function<void()> on_end;
+    std::function<void()> on_end;
     
-    timer(const float duration = 0, const function<void()> &on_end = nullptr);
+    timer(
+        const float duration = 0,
+        const std::function<void()> &on_end = nullptr
+    );
     ~timer();
     void start(const bool can_restart = true);
     void start(const float new_duration);
     void stop();
     void tick(const float amount);
-    float get_ratio_left();
+    float get_ratio_left() const;
 };
 
+
+
+/* ----------------------------------------------------------------------------
+ * Information about all of the maker tools.
+ */
+struct maker_tools_info {
+    //Show tree shadows in the area image tool?
+    bool area_image_shadows;
+    //Maximum width or height of the area image.
+    int area_image_size;
+    //Show mobs in the area image?
+    bool area_image_mobs;
+    //Automatically pick this from the list of the selected auto-entry mode.
+    string auto_start_option;
+    //Automatically enter this game mode when the game boots.
+    string auto_start_mode;
+    //Are we currently changing the game speed?
+    bool change_speed;
+    //Multiplier to change the game speed by.
+    float change_speed_mult;
+    //Are the tools enabled?
+    bool enabled;
+    //Is the geometry information tool enabled?
+    bool geometry_info;
+    //Are hitboxes visible in-game?
+    bool hitboxes;
+    //Mob currently locked-on to for the mob information tool. NULL if off.
+    mob* info_lock;
+    //If any maker info is being printed, this is how long it lasts on-screen.
+    float info_print_duration;
+    //If any maker info is being printed, this is how long its fade lasts.
+    float info_print_fade_duration;
+    //If any maker info is being printed, this is its text.
+    string info_print_text;
+    //If any maker info is being printed, this represents its time to live.
+    timer info_print_timer;
+    //For each key (F2 - F11, 0 - 9), what tool is bound to it?
+    unsigned char keys[20];
+    //When we last spawned a Pikmin, what was its type?
+    pikmin_type* last_pikmin_type;
+    //When hurting mobs with the hurting tool, dock this much of its max HP off.
+    float mob_hurting_ratio;
+    //Use the performance monitor?
+    bool use_perf_mon;
+    
+    maker_tools_info();
+};
 
 
 /* ----------------------------------------------------------------------------
@@ -79,6 +198,19 @@ struct timer {
  * are not the only thing using the bitmap manager.
  */
 struct bmp_manager {
+public:
+    bmp_manager(const string &base_dir);
+    ALLEGRO_BITMAP* get(
+        const string &name, data_node* node = NULL,
+        const bool report_errors = true
+    );
+    void detach(ALLEGRO_BITMAP* bmp);
+    void detach(const string &name);
+    void clear();
+    
+    long get_total_calls() const;
+    size_t get_list_size() const;
+    
 private:
     struct bmp_info {
         ALLEGRO_BITMAP* b;
@@ -90,18 +222,6 @@ private:
     long total_calls; //Useful for debugging.
     void detach(map<string, bmp_info>::iterator it);
     
-public:
-    bmp_manager(const string &base_dir);
-    ALLEGRO_BITMAP* get(
-        const string &name, data_node* node = NULL,
-        const bool report_errors = true
-    );
-    void detach(ALLEGRO_BITMAP* bmp);
-    void detach(const string &name);
-    void clear();
-    
-    long get_total_calls();
-    size_t get_list_size();
 };
 
 
@@ -125,6 +245,25 @@ struct button_manager {
 };
 
 
+/* ----------------------------------------------------------------------------
+ * List of fonts used in the game.
+ */
+struct font_list {
+    //Font for the area's name in loading screens.
+    ALLEGRO_FONT* area_name;
+    //Allegro's built-in font.
+    ALLEGRO_FONT* builtin;
+    //Font for HUD counters.
+    ALLEGRO_FONT* counter;
+    //Font for standard text.
+    ALLEGRO_FONT* main;
+    //Font for the carrying / money values.
+    ALLEGRO_FONT* value;
+    
+    font_list();
+};
+
+
 
 /* ----------------------------------------------------------------------------
  * Represents a HUD item. It contains data about where it should be placed,
@@ -142,6 +281,16 @@ struct hud_item {
  * Manages the HUD items.
  */
 struct hud_item_manager {
+public:
+    void set_item(
+        const size_t id,
+        const float x, const float y, const float w, const float h
+    );
+    bool get_draw_data(const size_t id, point* center, point* size) const;
+    void start_move(const bool in, const float duration);
+    void tick(const float time);
+    hud_item_manager(const size_t item_total);
+    
 private:
     vector<hud_item> items;
     bool move_in;
@@ -149,15 +298,6 @@ private:
     bool offscreen;
     void update_offscreen();
     
-public:
-    void set_item(
-        const size_t id,
-        const float x, const float y, const float w, const float h
-    );
-    bool get_draw_data(const size_t id, point* center, point* size);
-    void start_move(const bool in, const float duration);
-    void tick(const float time);
-    hud_item_manager(const size_t item_total);
 };
 
 
@@ -184,9 +324,35 @@ struct movement_struct {
     float left;
     float down;
     
-    void get_raw_info(point* coords, float* angle, float* magnitude);
-    void get_clean_info(point* coords, float* angle, float* magnitude);
+    void get_raw_info(point* coords, float* angle, float* magnitude) const;
+    void get_clean_info(point* coords, float* angle, float* magnitude) const;
     movement_struct();
+};
+
+
+
+/* ----------------------------------------------------------------------------
+ * Information about the current on-screen message box, if any.
+ */
+struct msg_box_info {
+    //Timer until the next character shows up.
+    timer char_timer;
+    //What character are we in?
+    size_t cur_char;
+    //What section of the message are we in?
+    size_t cur_section;
+    //Full text of the message.
+    string message;
+    //Icon that represents the speaker, if any.
+    ALLEGRO_BITMAP* speaker_icon;
+    //Stops scrolling when it reaches one of these. There's one per section.
+    vector<size_t> stopping_chars;
+    
+    bool advance();
+    vector<string> get_current_lines() const;
+    void tick(const float delta_t);
+    
+    msg_box_info(const string &text, ALLEGRO_BITMAP* speaker_icon);
 };
 
 
@@ -199,14 +365,30 @@ struct movement_struct {
  */
 struct reader_setter {
     data_node* node;
-    void set(const string &child, string &var);
-    void set(const string &child, size_t &var);
-    void set(const string &child, int &var);
-    void set(const string &child, unsigned char &var);
-    void set(const string &child, bool &var);
-    void set(const string &child, float &var);
-    void set(const string &child, ALLEGRO_COLOR &var);
-    void set(const string &child, point &var);
+    void set(
+        const string &child, string &var, data_node** child_node = NULL
+    );
+    void set(
+        const string &child, size_t &var, data_node** child_node = NULL
+    );
+    void set(
+        const string &child, int &var, data_node** child_node = NULL
+    );
+    void set(
+        const string &child, unsigned char &var, data_node** child_node = NULL
+    );
+    void set(
+        const string &child, bool &var, data_node** child_node = NULL
+    );
+    void set(
+        const string &child, float &var, data_node** child_node = NULL
+    );
+    void set(
+        const string &child, ALLEGRO_COLOR &var, data_node** child_node = NULL
+    );
+    void set(
+        const string &child, point &var, data_node** child_node = NULL
+    );
     reader_setter(data_node* dn = NULL);
 };
 
@@ -240,38 +422,109 @@ struct sample_struct {
  * an enum, hence, there are no gaps.
  */
 struct sector_types_manager {
-private:
-    vector<string> names;
-    
 public:
     void register_type(const unsigned char nr, const string &name);
-    unsigned char get_nr(const string &name);
-    string get_name(const unsigned char nr);
-    unsigned char get_nr_of_types();
+    unsigned char get_nr(const string &name) const;
+    string get_name(const unsigned char nr) const;
+    unsigned char get_nr_of_types() const;
+    
+private:
+    vector<string> names;
     
 };
 
 
 
 /* ----------------------------------------------------------------------------
+ * Makes it easy to read script variables, and make changes based on which
+ * ones exist, and what values they have.
+ */
+struct script_var_reader {
+    map<string, string> &vars;
+    bool get(const string &name, string &dest) const;
+    bool get(const string &name, size_t &dest) const;
+    bool get(const string &name, int &dest) const;
+    bool get(const string &name, unsigned char &dest) const;
+    bool get(const string &name, bool &dest) const;
+    bool get(const string &name, float &dest) const;
+    bool get(const string &name, ALLEGRO_COLOR &dest) const;
+    bool get(const string &name, point &dest) const;
+    script_var_reader(map<string, string> &vars);
+};
+
+
+
+/* ----------------------------------------------------------------------------
+ * List of loaded system assets.
+ */
+struct system_asset_list {
+    //Bitmaps.
+    ALLEGRO_BITMAP* bmp_checkbox_check;
+    ALLEGRO_BITMAP* bmp_cursor;
+    ALLEGRO_BITMAP* bmp_cursor_invalid;
+    ALLEGRO_BITMAP* bmp_enemy_spirit;
+    ALLEGRO_BITMAP* bmp_icon;
+    ALLEGRO_BITMAP* bmp_idle_glow;
+    ALLEGRO_BITMAP* bmp_mouse_button_icon[3];
+    ALLEGRO_BITMAP* bmp_mouse_cursor;
+    ALLEGRO_BITMAP* bmp_mouse_wd_icon;
+    ALLEGRO_BITMAP* bmp_mouse_wu_icon;
+    ALLEGRO_BITMAP* bmp_notification;
+    ALLEGRO_BITMAP* bmp_pikmin_silhouette;
+    ALLEGRO_BITMAP* bmp_pikmin_spirit;
+    ALLEGRO_BITMAP* bmp_rock;
+    ALLEGRO_BITMAP* bmp_shadow;
+    ALLEGRO_BITMAP* bmp_smack;
+    ALLEGRO_BITMAP* bmp_smoke;
+    ALLEGRO_BITMAP* bmp_sparkle;
+    ALLEGRO_BITMAP* bmp_spotlight;
+    ALLEGRO_BITMAP* bmp_swarm_arrow;
+    ALLEGRO_BITMAP* bmp_wave_ring;
+    
+    //Sound effects.
+    sample_struct sfx_attack;
+    sample_struct sfx_camera;
+    sample_struct sfx_pikmin_attack;
+    sample_struct sfx_pikmin_called;
+    sample_struct sfx_pikmin_carrying;
+    sample_struct sfx_pikmin_carrying_grab;
+    sample_struct sfx_pikmin_caught;
+    sample_struct sfx_pikmin_dying;
+    sample_struct sfx_pikmin_held;
+    sample_struct sfx_pikmin_idle;
+    sample_struct sfx_pluck;
+    sample_struct sfx_pikmin_plucked;
+    sample_struct sfx_pikmin_thrown;
+    sample_struct sfx_switch_pikmin;
+    sample_struct sfx_throw;
+    
+    //Animations.
+    single_animation_suite spark_animation;
+    
+    system_asset_list();
+};
+
+
+/* ----------------------------------------------------------------------------
  * Manages fade ins/outs for transitions.
  */
 struct fade_manager {
-private:
-    float time_left;
-    bool fade_in;
-    function<void()> on_end;
-    
 public:
     static const float FADE_DURATION;
     
     fade_manager();
-    void start_fade(const bool fade_in, const function<void()> &on_end);
-    bool is_fade_in();
-    bool is_fading();
-    float get_perc_left();
+    void start_fade(const bool fade_in, const std::function<void()> &on_end);
+    bool is_fade_in() const;
+    bool is_fading() const;
+    float get_perc_left() const;
     void tick(const float time);
     void draw();
+    
+private:
+    float time_left;
+    bool fade_in;
+    std::function<void()> on_end;
+    
 };
 
 
@@ -309,51 +562,87 @@ struct spike_damage_type {
 
 
 /* ----------------------------------------------------------------------------
- * Holds information about how a sprite should be resized, colored, etc.,
- * over time, right before it is drawn to the screen.
+ * Contains information on how a bitmap should be drawn, in regards to
+ * translation, rotation, coloring, etc.
  */
-struct bitmap_effect_props {
+struct bitmap_effect_info {
+    //Offset horizontally and vertically by this much.
     point translation;
+    //Rotate the bitmap by this angle, in radians.
     float rotation;
+    //Scale horizontally and vertically. LARGE_FLOAT = use the other's scale.
     point scale;
+    //Tint the bitmap by this color. Also makes it transparent.
     ALLEGRO_COLOR tint_color;
+    //Re-draws the bitmap on top, in additive blend, with this color.
     ALLEGRO_COLOR glow_color;
-    
-    bitmap_effect_props();
+    bitmap_effect_info();
 };
 
 
 
-/* ----------------------------------------------------------------------------
- * A full bitmap effect. It is made of several properties, and has the
- * information necessary to interpolate the properties' values over time.
- * If an effect only has one keyframe, no interpolations are made.
- */
-struct bitmap_effect {
-private:
-    map<float, bitmap_effect_props> keyframes;
-    float cur_time;
-    
-public:
-    void add_keyframe(const float time, const bitmap_effect_props &props);
-    void set_cur_time(const float cur_time);
-    bitmap_effect_props get_final_properties();
-    
-    bitmap_effect();
+enum PERF_MON_STATES {
+    PERF_MON_STATE_LOADING,
+    PERF_MON_STATE_FRAME,
 };
 
 
-
 /* ----------------------------------------------------------------------------
- * Holds several bitmap effect structs.
+ * Contains information about how long certain things took. Useful for makers
+ * to monitor performance with.
  */
-struct bitmap_effect_manager {
-private:
-    vector<bitmap_effect> effects;
-    
+struct performance_monitor_struct {
 public:
-    void add_effect(bitmap_effect e);
-    bitmap_effect_props get_final_properties();
+    performance_monitor_struct();
+    void set_area_name(const string &name);
+    void set_paused(const bool paused);
+    void enter_state(const PERF_MON_STATES mode);
+    void leave_state();
+    void start_measurement(const string &name);
+    void finish_measurement();
+    void save_log();
+    void reset();
+    
+private:
+
+    struct page {
+    public:
+        double duration;
+        vector<std::pair<string, double> > measurements;
+        page();
+        void write(string &s);
+        
+    private:
+        void write_measurement(
+            string &str, const string &name,
+            const double time, const float total
+        );
+    };
+    
+    //Name of the area being monitored.
+    string area_name;
+    //Current state.
+    PERF_MON_STATES cur_state;
+    //Is the monitoring currently paused?
+    bool paused;
+    //When the current state began.
+    double cur_state_start_time;
+    //When the current measurement began.
+    double cur_measurement_start_time;
+    //Name of the current measurement.
+    string cur_measurement_name;
+    //Page of information about the current working info.
+    performance_monitor_struct::page cur_page;
+    //How many frames of gameplay have been sampled.
+    size_t frame_samples;
+    //Page of information about the loading process.
+    performance_monitor_struct::page loading_page;
+    //Page of information about the average frame.
+    performance_monitor_struct::page frame_avg_page;
+    //Page of information about the fastest frame.
+    performance_monitor_struct::page frame_fastest_page;
+    //Page of information about the slowest frame.
+    performance_monitor_struct::page frame_slowest_page;
 };
 
 
@@ -363,22 +652,26 @@ enum SUBGROUP_TYPE_CATEGORIES {
     SUBGROUP_TYPE_CATEGORY_LEADER,
     SUBGROUP_TYPE_CATEGORY_TOOL,
 };
+
+
 struct subgroup_type_manager;
+
 
 /* ----------------------------------------------------------------------------
  * Represents a leader subgroup type;
  * a Red Pikmin, a Yellow Pikmin, a leader, etc.
  */
 struct subgroup_type {
+public:
+    SUBGROUP_TYPE_CATEGORIES get_category() const { return category; }
+    ALLEGRO_BITMAP* get_icon() const { return icon; }
+    
 private:
     friend subgroup_type_manager;
     SUBGROUP_TYPE_CATEGORIES category;
     mob_type* specific_type;
     ALLEGRO_BITMAP* icon;
     subgroup_type() : specific_type(nullptr), icon(nullptr) { }
-public:
-    SUBGROUP_TYPE_CATEGORIES get_category() { return category; }
-    ALLEGRO_BITMAP* get_icon() { return icon; }
 };
 
 
@@ -386,8 +679,6 @@ public:
  * Manages what types of subgroups exist.
  */
 struct subgroup_type_manager {
-private:
-    vector<subgroup_type*> types;
 public:
     void register_type(
         const SUBGROUP_TYPE_CATEGORIES category,
@@ -397,11 +688,14 @@ public:
     subgroup_type* get_type(
         const SUBGROUP_TYPE_CATEGORIES category,
         mob_type* specific_type = NULL
-    );
-    subgroup_type* get_first_type();
-    subgroup_type* get_prev_type(subgroup_type* sgt);
-    subgroup_type* get_next_type(subgroup_type* sgt);
+    ) const;
+    subgroup_type* get_first_type() const;
+    subgroup_type* get_prev_type(subgroup_type* sgt) const;
+    subgroup_type* get_next_type(subgroup_type* sgt) const;
     void clear();
+    
+private:
+    vector<subgroup_type*> types;
 };
 
 
@@ -413,6 +707,42 @@ struct spray_stats_struct {
     size_t nr_sprays;
     size_t nr_ingredients;
     spray_stats_struct() : nr_sprays(0), nr_ingredients(0) { }
+};
+
+
+/* ----------------------------------------------------------------------------
+ * Contains info about the current whistle usage.
+ */
+struct whistle_struct {
+    //Radius of every 6th dot.
+    float dot_radius[6];
+    //Radius the whistle was at pre-fade.
+    float fade_radius;
+    //Time left for the whistle's fading animations.
+    timer fade_timer;
+    //Time left until the next series of dots begins.
+    timer next_dot_timer;
+    //Time left until the next ring is spat out.
+    timer next_ring_timer;
+    //Current radius of the whistle.
+    float radius;
+    //Color index of each ring.
+    vector<unsigned char> ring_colors;
+    //Color index of the previous ring.
+    unsigned char ring_prev_color;
+    //Distance of each ring.
+    vector<float> rings;
+    //Is the whistle currently being blown?
+    bool whistling;
+    
+    void start_whistling();
+    void stop_whistling();
+    void tick(
+        const float delta_t,
+        const float whistle_range, const dist &leader_to_cursor_dist
+    );
+    
+    whistle_struct();
 };
 
 

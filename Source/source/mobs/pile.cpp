@@ -12,11 +12,19 @@
 
 #include "../drawing.h"
 #include "../functions.h"
+#include "../game.h"
 #include "../utils/string_utils.h"
-#include "../vars.h"
+#include "resource.h"
+
 
 /* ----------------------------------------------------------------------------
  * Creates a pile.
+ * pos:
+ *   Starting coordinates.
+ * type:
+ *   Pile type this mob belongs to.
+ * angle:
+ *   Starting angle.
  */
 pile::pile(const point &pos, pile_type* type, const float angle) :
     mob(pos, type, angle),
@@ -32,6 +40,8 @@ pile::pile(const point &pos, pile_type* type, const float angle) :
 
 /* ----------------------------------------------------------------------------
  * Changes the amount in the pile, and updates the appropriate variables.
+ * change:
+ *   Amount to increase by.
  */
 void pile::change_amount(const int change) {
     if(change < 0 && amount == 0) return;
@@ -46,14 +56,20 @@ void pile::change_amount(const int change) {
 
 /* ----------------------------------------------------------------------------
  * Reads the provided script variables, if any, and does stuff with them.
+ * svr:
+ *   Script var reader to use.
  */
-void pile::read_script_vars(const string &vars) {
-    mob::read_script_vars(vars);
-    amount = s2i(get_var_value(vars, "amount", i2s(pil_type->max_amount)));
-    amount = clamp(amount, 0, pil_type->max_amount);
+void pile::read_script_vars(const script_var_reader &svr) {
+    mob::read_script_vars(svr);
+    
+    size_t amount_var;
+    
+    if(svr.get("amount", amount_var)) {
+        amount = amount_var;
+        amount = clamp(amount, 0, pil_type->max_amount);
+    }
     
     health = pil_type->health_per_resource * amount;
-    
     update();
 }
 
@@ -69,15 +85,21 @@ void pile::recharge() {
 
 /* ----------------------------------------------------------------------------
  * Ticks some logic specific to piles.
+ * delta_t:
+ *   How many seconds to tick by.
  */
-void pile::tick_class_specifics() {
+void pile::tick_class_specifics(const float delta_t) {
     recharge_timer.tick(delta_t);
     
     if(amount == 0 && pil_type->delete_when_finished) {
         //Ready to delete. Unless it's being used, that is.
         
-        for(size_t r = 0; r < resources.size(); ++r) {
-            if(resources[r]->origin_pile == this) {
+        for(
+            size_t r = 0;
+            r < game.states.gameplay_st->mobs.resources.size(); ++r
+        ) {
+            resource* r_ptr = game.states.gameplay_st->mobs.resources[r];
+            if(r_ptr->origin_pile == this) {
                 return;
             }
         }

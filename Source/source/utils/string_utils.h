@@ -15,18 +15,29 @@
 #include <string>
 #include <vector>
 
-using namespace std;
+
+using std::size_t;
+using std::string;
+using std::vector;
+
 
 //Converts an integer (or long) to a string.
-#define i2s(n) to_string((long long) (n))
+#define i2s(n) std::to_string((long long) (n))
 
+string amount_str(
+    const int amount, const string &singular_text,
+    const string &plural_text = ""
+);
 string box_string(
     const string &s, const size_t size, const string &finisher = ""
 );
 string b2s(const bool b);
 string f2s(const float f);
 bool is_number(const string &s);
-string replace_all(string s, string search, string replacement);
+string remove_extension(const string &s);
+string replace_all(
+    string s, const string &search, const string &replacement
+);
 bool s2b(const string &s);
 double s2f(const string &s);
 int s2i(const string &s);

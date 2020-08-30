@@ -13,15 +13,13 @@
 #include "../functions.h"
 #include "../utils/string_utils.h"
 
+
 /* ----------------------------------------------------------------------------
  * Creates a type of enemy.
  */
 enemy_type::enemy_type() :
     mob_type(MOB_CATEGORY_ENEMIES),
     pikmin_seeds(0),
-    value(0),
-    revive_speed(0),
-    is_boss(false),
     drops_corpse(true),
     allow_ground_attacks(true) {
     
@@ -34,29 +32,43 @@ enemy_type::enemy_type() :
         MOB_TARGET_TYPE_PLAYER |
         MOB_TARGET_TYPE_FRAGILE;
         
+    starting_team = MOB_TEAM_ENEMY_1;
+    
+    area_editor_prop_struct aep_spoils;
+    aep_spoils.name = "Spoils";
+    aep_spoils.var = "spoils";
+    aep_spoils.type = AEMP_TEXT;
+    aep_spoils.def_value = "";
+    aep_spoils.tooltip =
+        "What objects it drops upon defeat, separated by colon.\n";
+    area_editor_props.push_back(aep_spoils);
+    
+    area_editor_prop_struct aep_pellets;
+    aep_pellets.name = "Pellets";
+    aep_pellets.var = "random_pellet_spoils";
+    aep_pellets.type = AEMP_TEXT;
+    aep_pellets.def_value = "";
+    aep_pellets.tooltip =
+        "What pellets it drops upon defeat, separated by colon.\n"
+        "The color of each pellet is random (from the ones available in "
+        "the area),\n"
+        "but the number matches what you type.\n"
+        "e.g.: \"1,1,5\" would spawn two 1 pellets and one 5 pellet.";
+    area_editor_props.push_back(aep_pellets);
+    
     add_carrying_states();
 }
 
 
 /* ----------------------------------------------------------------------------
- * Loads parameters from a data file.
+ * Loads properties from a data file.
+ * file:
+ *   File to read from.
  */
-void enemy_type::load_parameters(data_node* file) {
-    drops_corpse =
-        s2b(
-            file->get_child_by_name("drops_corpse")->get_value_or_default("yes")
-        );
-    is_boss = s2b(file->get_child_by_name("is_boss")->value);
-    pikmin_seeds = s2i(file->get_child_by_name("pikmin_seeds")->value);
-    revive_speed = s2f(file->get_child_by_name("revive_speed")->value);
-    value = s2f(file->get_child_by_name("value")->value);
-    allow_ground_attacks =
-        s2b(
-            file->get_child_by_name("allow_ground_attacks")
-            ->get_value_or_default("true")
-        );
-        
+void enemy_type::load_properties(data_node* file) {
+    reader_setter rs(file);
+    
+    rs.set("allow_ground_attacks", allow_ground_attacks);
+    rs.set("drops_corpse", drops_corpse);
+    rs.set("pikmin_seeds", pikmin_seeds);
 }
-
-
-enemy_type::~enemy_type() { }

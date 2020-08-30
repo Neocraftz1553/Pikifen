@@ -12,8 +12,8 @@
 
 #include "leader_category.h"
 
+#include "../game.h"
 #include "../mobs/leader.h"
-#include "../vars.h"
 
 
 /* ----------------------------------------------------------------------------
@@ -22,29 +22,38 @@
 leader_category::leader_category() :
     mob_category(
         MOB_CATEGORY_LEADERS, "Leader", "Leaders",
-        LEADERS_FOLDER_PATH, al_map_rgb(48, 80, 192)
+        "Leaders", al_map_rgb(73, 204, 204)
     ) {
     
 }
 
 
 /* ----------------------------------------------------------------------------
- * Returns all types of leader by name.
+ * Clears the list of registered types of leader.
  */
-void leader_category::get_type_names(vector<string> &list) {
-    for(auto t = leader_types.begin(); t != leader_types.end(); ++t) {
-        list.push_back(t->first);
+void leader_category::clear_types() {
+    for(auto &t : game.mob_types.leader) {
+        delete t.second;
     }
+    game.mob_types.leader.clear();
 }
 
 
 /* ----------------------------------------------------------------------------
- * Returns a type of leader given its name, or NULL on error.
+ * Creates a leader and adds it to the list of leaders.
+ * pos:
+ *   Starting coordinates.
+ * type:
+ *   Mob type.
+ * angle:
+ *   Starting angle.
  */
-mob_type* leader_category::get_type(const string &name) {
-    auto it = leader_types.find(name);
-    if(it == leader_types.end()) return NULL;
-    return it->second;
+mob* leader_category::create_mob(
+    const point &pos, mob_type* type, const float angle
+) {
+    leader* m = new leader(pos, (leader_type*) type, angle);
+    game.states.gameplay_st->mobs.leaders.push_back(m);
+    return m;
 }
 
 
@@ -57,44 +66,50 @@ mob_type* leader_category::create_type() {
 
 
 /* ----------------------------------------------------------------------------
- * Registers a created type of leader.
- */
-void leader_category::register_type(mob_type* type) {
-    leader_types[type->name] = (leader_type*) type;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Creates a leader and adds it to the list of leaders.
- */
-mob* leader_category::create_mob(
-    const point &pos, mob_type* type, const float angle
-) {
-    leader* m = new leader(pos, (leader_type*) type, angle);
-    leaders.push_back(m);
-    return m;
-}
-
-
-/* ----------------------------------------------------------------------------
  * Clears a leader from the list of leaders.
+ * m:
+ *   The mob to erase.
  */
 void leader_category::erase_mob(mob* m) {
-    leaders.erase(
-        find(leaders.begin(), leaders.end(), (leader*) m)
+    game.states.gameplay_st->mobs.leaders.erase(
+        find(
+        game.states.gameplay_st->mobs.leaders.begin(),
+        game.states.gameplay_st->mobs.leaders.end(),
+        (leader*) m
+        )
     );
 }
 
 
 /* ----------------------------------------------------------------------------
- * Clears the list of registered types of leader.
+ * Returns a type of leader given its name, or NULL on error.
+ * name:
+ *   Name of the mob type to get.
  */
-void leader_category::clear_types() {
-    for(auto t = leader_types.begin(); t != leader_types.end(); ++t) {
-        delete t->second;
-    }
-    leader_types.clear();
+mob_type* leader_category::get_type(const string &name) const {
+    auto it = game.mob_types.leader.find(name);
+    if(it == game.mob_types.leader.end()) return NULL;
+    return it->second;
 }
 
 
-leader_category::~leader_category() { }
+/* ----------------------------------------------------------------------------
+ * Returns all types of leader by name.
+ * list:
+ *   This list gets filled with the mob type names.
+ */
+void leader_category::get_type_names(vector<string> &list) const {
+    for(auto &t : game.mob_types.leader) {
+        list.push_back(t.first);
+    }
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Registers a created type of leader.
+ * type:
+ *   Mob type to register.
+ */
+void leader_category::register_type(mob_type* type) {
+    game.mob_types.leader[type->name] = (leader_type*) type;
+}

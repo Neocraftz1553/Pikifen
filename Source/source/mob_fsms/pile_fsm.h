@@ -13,13 +13,16 @@
 
 #include "../mob_types/mob_type.h"
 
+
 /* ----------------------------------------------------------------------------
  * Functions about the pile's finite state machine and behavior.
  */
 namespace pile_fsm {
 void create_fsm(mob_type* typ);
+
 void be_attacked(mob* m, void* info1, void* info2);
 void become_idle(mob* m, void* info1, void* info2);
 }
+
 
 #endif //ifndef PILE_FSM_INCLUDED

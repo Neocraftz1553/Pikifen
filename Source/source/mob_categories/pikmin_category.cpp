@@ -12,8 +12,8 @@
 
 #include "pikmin_category.h"
 
+#include "../game.h"
 #include "../mobs/pikmin.h"
-#include "../vars.h"
 
 
 /* ----------------------------------------------------------------------------
@@ -22,29 +22,38 @@
 pikmin_category::pikmin_category() :
     mob_category(
         MOB_CATEGORY_PIKMIN, "Pikmin", "Pikmin",
-        PIKMIN_FOLDER_PATH, al_map_rgb(64, 255, 64)
+        "Pikmin", al_map_rgb(100, 204, 73)
     ) {
     
 }
 
 
 /* ----------------------------------------------------------------------------
- * Returns all types of Pikmin by name.
+ * Clears the list of registered types of Pikmin.
  */
-void pikmin_category::get_type_names(vector<string> &list) {
-    for(auto t = pikmin_types.begin(); t != pikmin_types.end(); ++t) {
-        list.push_back(t->first);
+void pikmin_category::clear_types() {
+    for(auto &t : game.mob_types.pikmin) {
+        delete t.second;
     }
+    game.mob_types.pikmin.clear();
 }
 
 
 /* ----------------------------------------------------------------------------
- * Returns a type of Pikmin given its name, or NULL on error.
+ * Creates a Pikmin and adds it to the list of Pikmin.
+ * pos:
+ *   Starting coordinates.
+ * type:
+ *   Mob type.
+ * angle:
+ *   Starting angle.
  */
-mob_type* pikmin_category::get_type(const string &name) {
-    auto it = pikmin_types.find(name);
-    if(it == pikmin_types.end()) return NULL;
-    return it->second;
+mob* pikmin_category::create_mob(
+    const point &pos, mob_type* type, const float angle
+) {
+    pikmin* m = new pikmin(pos, (pikmin_type*) type, angle);
+    game.states.gameplay_st->mobs.pikmin_list.push_back(m);
+    return m;
 }
 
 
@@ -57,43 +66,50 @@ mob_type* pikmin_category::create_type() {
 
 
 /* ----------------------------------------------------------------------------
- * Registers a created type of Pikmin.
- */
-void pikmin_category::register_type(mob_type* type) {
-    pikmin_types[type->name] = (pikmin_type*) type;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Creates a Pikmin and adds it to the list of Pikmin.
- */
-mob* pikmin_category::create_mob(
-    const point &pos, mob_type* type, const float angle
-) {
-    pikmin* m = new pikmin(pos, (pikmin_type*) type, angle);
-    pikmin_list.push_back(m);
-    return m;
-}
-
-
-/* ----------------------------------------------------------------------------
  * Clears a Pikmin from the list of Pikmin.
+ * m:
+ *   The mob to erase.
  */
 void pikmin_category::erase_mob(mob* m) {
-    pikmin_list.erase(
-        find(pikmin_list.begin(), pikmin_list.end(), (pikmin*) m)
+    game.states.gameplay_st->mobs.pikmin_list.erase(
+        find(
+        game.states.gameplay_st->mobs.pikmin_list.begin(), 
+        game.states.gameplay_st->mobs.pikmin_list.end(), 
+        (pikmin*) m
+        )
     );
 }
 
 
 /* ----------------------------------------------------------------------------
- * Clears the list of registered types of Pikmin.
+ * Returns a type of Pikmin given its name, or NULL on error.
+ * name:
+ *   Name of the mob type to get.
  */
-void pikmin_category::clear_types() {
-    for(auto t = pikmin_types.begin(); t != pikmin_types.end(); ++t) {
-        delete t->second;
-    }
-    pikmin_types.clear();
+mob_type* pikmin_category::get_type(const string &name) const {
+    auto it = game.mob_types.pikmin.find(name);
+    if(it == game.mob_types.pikmin.end()) return NULL;
+    return it->second;
 }
 
-pikmin_category::~pikmin_category() { }
+
+/* ----------------------------------------------------------------------------
+ * Returns all types of Pikmin by name.
+ * list:
+ *   This list gets filled with the mob type names.
+ */
+void pikmin_category::get_type_names(vector<string> &list) const {
+    for(auto &t : game.mob_types.pikmin) {
+        list.push_back(t.first);
+    }
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Registers a created type of Pikmin.
+ * type:
+ *   Mob type to register.
+ */
+void pikmin_category::register_type(mob_type* type) {
+    game.mob_types.pikmin[type->name] = (pikmin_type*) type;
+}

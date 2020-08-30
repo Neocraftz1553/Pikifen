@@ -1,0 +1,37 @@
+first_state = idling
+
+script {
+    idling {
+        on_enter {
+            set_animation idling
+            stop
+            stop_particles
+        }
+        on_receive_message {
+            set_state moving
+        }
+    }
+    
+    moving {
+        on_enter {
+            focus link
+            move_to_target focused_mob
+            start_particles cardboard_box_dust -108 0 0
+        }
+        on_receive_message {
+            set_state idling
+        }
+        on_reach_destination {
+            set_health 0
+            set_state done
+        }
+    }
+    
+    done {
+        on_enter {
+            stop
+            stop_particles
+            send_message_to_links obstacle_in_place
+        }
+    }
+}

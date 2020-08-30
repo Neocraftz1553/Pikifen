@@ -11,9 +11,20 @@
 #ifndef PELLET_TYPE_INCLUDED
 #define PELLET_TYPE_INCLUDED
 
-#include "../data_file.h"
+#include "../utils/data_file.h"
 #include "mob_type.h"
 #include "pikmin_type.h"
+
+
+enum PELLET_STATES {
+    PELLET_STATE_IDLE_WAITING,
+    PELLET_STATE_IDLE_MOVING,
+    PELLET_STATE_IDLE_STUCK,
+    PELLET_STATE_BEING_DELIVERED,
+    
+    N_PELLET_STATES,
+};
+
 
 /* ----------------------------------------------------------------------------
  * A pellet type. Contains info on
@@ -25,20 +36,20 @@ class pellet_type : public mob_type {
 public:
     pikmin_type* pik_type;
     //Number on the pellet, and hence, its weight.
-    unsigned number;
+    size_t number;
     //Number of seeds given out if the pellet's taken to a matching Onion.
-    unsigned match_seeds;
+    size_t match_seeds;
     //Number of seeds given out if the pellet's taken to a non-matching Onion.
-    unsigned non_match_seeds;
+    size_t non_match_seeds;
     ALLEGRO_BITMAP* bmp_number;
     
     pellet_type();
-    ~pellet_type();
-    void load_parameters(data_node* file);
+    void load_properties(data_node* file);
     void load_resources(data_node* file);
-    anim_conversion_vector get_anim_conversions();
+    anim_conversion_vector get_anim_conversions() const;
     void unload_resources();
     
 };
+
 
 #endif //ifndef PELLET_TYPE_INCLUDED

@@ -15,99 +15,131 @@
 
 #include "../drawing.h"
 #include "../functions.h"
+#include "../game.h"
 #include "../mob_types/mob_type.h"
 #include "../utils/math_utils.h"
 #include "../utils/string_utils.h"
 
+
 /* ----------------------------------------------------------------------------
  * Creates an enemy mob.
+ * pos:
+ *   Starting coordinates.
+ * type:
+ *   Enemy type this mob belongs to.
+ * angle:
+ *   Starting angle.
  */
 enemy::enemy(const point &pos, enemy_type* type, const float angle) :
     mob(pos, type, angle),
-    ene_type(type),
-    spawn_delay(0),
-    respawn_days_left(0),
-    respawns_after_x_days(0),
-    appears_after_day(0),
-    appears_before_day(0),
-    appears_every_x_days(0) {
-    
-    team = MOB_TEAM_ENEMY_1; //TODO removeish.
-}
-
-
-/* ----------------------------------------------------------------------------
- * Draws an enemy, tinting it if necessary (for Onion delivery).
- */
-void enemy::draw_mob(bitmap_effect_manager* effect_manager) {
-    sprite* s_ptr = anim.get_cur_sprite();
-    if(!s_ptr) return;
-    
-    point draw_pos = get_sprite_center(s_ptr);
-    point draw_size = get_sprite_dimensions(s_ptr);
-    
-    bitmap_effect_manager effects;
-    
-    if(fsm.cur_state->id == ENEMY_EXTRA_STATE_BEING_DELIVERED) {
-        onion* o_ptr = ((onion*) focused_mob);
-        add_delivery_bitmap_effect(
-            &effects, script_timer.get_ratio_left(),
-            o_ptr->oni_type->pik_type->main_color
-        );
-    }
-    
-    add_status_bitmap_effects(&effects);
-    add_sector_brightness_bitmap_effect(&effects);
-    
-    draw_bitmap_with_effects(
-        s_ptr->bitmap,
-        draw_pos, draw_size,
-        angle + s_ptr->angle, &effects
-    );
-    
-    draw_status_effect_bmp(this, &effects);
+    ene_type(type) {
     
 }
 
 
 /* ----------------------------------------------------------------------------
  * Returns whether or not an enemy can receive a given status effect.
+ * s:
+ *   Status type to check.
  */
-bool enemy::can_receive_status(status_type* s) {
+bool enemy::can_receive_status(status_type* s) const {
     return s->affects & STATUS_AFFECTS_ENEMIES;
 }
 
 
 /* ----------------------------------------------------------------------------
- * Reads the provided script variables, if any, and does stuff with them.
+ * Draws an enemy, tinting it if necessary (for Onion delivery).
  */
-void enemy::read_script_vars(const string &vars) {
-    mob::read_script_vars(vars);
+void enemy::draw_mob() {
+    sprite* s_ptr = anim.get_cur_sprite();
+    if(!s_ptr) return;
     
-    spawn_delay = s2f(get_var_value(vars, "spawn_delay", "0"));
-    vector<string> spoils_strs =
-        semicolon_list_to_vector(get_var_value(vars, "spoils", ""), ",");
-    vector<string> random_pellet_spoils_strs =
-        semicolon_list_to_vector(
-            get_var_value(vars, "random_pellet_spoils", ""), ","
-        );
-        
-    for(size_t s = 0; s < spoils_strs.size(); ++s) {
-        mob_type* type_ptr =
-            mob_categories.find_mob_type(spoils_strs[s]);
-        if(!type_ptr) {
-            log_error(
-                "A mob (" + get_error_message_mob_info(this) + ") is set to "
-                "have a spoil of type \"" + spoils_strs[s] + "\", but no "
-                "such mob type exists!"
-            );
-            continue;
-        }
-        specific_spoils.push_back(type_ptr);
+    bitmap_effect_info eff;
+    ALLEGRO_COLOR delivery_color = map_gray(0);
+    float delivery_time_ratio_left = LARGE_FLOAT;
+    
+    if(fsm.cur_state->id == ENEMY_EXTRA_STATE_BEING_DELIVERED) {
+        delivery_color = ((onion*) focused_mob)->oni_type->pik_type->main_color;
+        delivery_time_ratio_left = script_timer.get_ratio_left();
     }
     
-    for(size_t s = 0; s < random_pellet_spoils_strs.size(); ++s) {
-        random_pellet_spoils.push_back(s2i(random_pellet_spoils_strs[s]));
+    get_sprite_bitmap_effects(
+        s_ptr, &eff, true, true,
+        delivery_time_ratio_left, delivery_color
+    );
+    
+    draw_bitmap_with_effects(s_ptr->bitmap, eff);
+    
+    draw_status_effect_bmp(this, eff);
+}
+
+
+//Normally, the spirit's diameter is the enemy's. Multiply the spirit by this.
+const float ENEMY_SPIRIT_SIZE_MULT = 0.7;
+//Maximum diameter an enemy's spirit can be.
+const float ENEMY_SPIRIT_MAX_SIZE = 128;
+//Minimum diameter an enemy's spirit can be.
+const float ENEMY_SPIRIT_MIN_SIZE = 16;
+
+/* ----------------------------------------------------------------------------
+ * Logic specific to enemies for when they finish dying.
+ */
+void enemy::finish_dying_class_specifics() {
+    if(ene_type->drops_corpse) {
+        become_carriable(CARRY_DESTINATION_ONION);
+        fsm.set_state(ENEMY_EXTRA_STATE_CARRIABLE_WAITING);
+    }
+    particle par(
+        PARTICLE_TYPE_ENEMY_SPIRIT, pos, LARGE_FLOAT,
+        clamp(
+            type->radius * 2 * ENEMY_SPIRIT_SIZE_MULT,
+            ENEMY_SPIRIT_MIN_SIZE, ENEMY_SPIRIT_MAX_SIZE
+        ),
+        2, PARTICLE_PRIORITY_MEDIUM
+    );
+    par.bitmap = game.sys_assets.bmp_enemy_spirit;
+    par.speed.x = 0;
+    par.speed.y = -50;
+    par.friction = 0.5;
+    par.gravity = 0;
+    par.color = al_map_rgb(255, 192, 255);
+    game.states.gameplay_st->particles.add(par);
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Reads the provided script variables, if any, and does stuff with them.
+ * svr:
+ *   Script var reader to read with.
+ */
+void enemy::read_script_vars(const script_var_reader &svr) {
+    mob::read_script_vars(svr);
+    
+    string spoils_var;
+    string random_pellet_spoils_var;
+    
+    if(svr.get("spoils", spoils_var)) {
+        vector<string> spoils_strs = semicolon_list_to_vector(spoils_var, ",");
+        for(size_t s = 0; s < spoils_strs.size(); ++s) {
+            mob_type* type_ptr =
+                game.mob_categories.find_mob_type(spoils_strs[s]);
+            if(!type_ptr) {
+                log_error(
+                    "A mob (" + get_error_message_mob_info(this) +
+                    ") is set to have a spoil of type \"" + spoils_strs[s] +
+                    "\", but no such mob type exists!"
+                );
+                continue;
+            }
+            specific_spoils.push_back(type_ptr);
+        }
+    }
+    if(svr.get("random_pellet_spoils", random_pellet_spoils_var)) {
+        vector<string> random_pellet_spoils_strs =
+            semicolon_list_to_vector(random_pellet_spoils_var, ",");
+        for(size_t s = 0; s < random_pellet_spoils_strs.size(); ++s) {
+            random_pellet_spoils.push_back(s2i(random_pellet_spoils_strs[s]));
+        }
     }
 }
 
@@ -115,7 +147,7 @@ void enemy::read_script_vars(const string &vars) {
 /* ----------------------------------------------------------------------------
  * Sets up stuff for the beginning of the enemy's death process.
  */
-void enemy::start_dying_class_specific() {
+void enemy::start_dying_class_specifics() {
     vector<mob_type*> spoils_to_spawn = specific_spoils;
     
     //If there are random pellets to spawn, then prepare some data.
@@ -124,8 +156,12 @@ void enemy::start_dying_class_specific() {
         
         //Start by obtaining a list of available Pikmin types, given the
         //Onions currently in the area.
-        for(size_t o = 0; o < onions.size(); ++o) {
-            available_pik_types.push_back(onions[o]->oni_type->pik_type);
+        for(
+            size_t o = 0; o < game.states.gameplay_st->mobs.onions.size(); ++o
+        ) {
+            available_pik_types.push_back(
+                game.states.gameplay_st->mobs.onions[o]->oni_type->pik_type
+            );
         }
         
         //Remove duplicates from the list.
@@ -141,10 +177,10 @@ void enemy::start_dying_class_specific() {
             
             //Check the pellet types that match that number and
             //also match the available Pikmin types.
-            for(auto p = pellet_types.begin(); p != pellet_types.end(); ++p) {
+            for(auto &p : game.mob_types.pellet) {
                 bool pik_type_ok = false;
                 for(size_t pt = 0; pt < available_pik_types.size(); ++pt) {
-                    if(p->second->pik_type == available_pik_types[pt]) {
+                    if(p.second->pik_type == available_pik_types[pt]) {
                         pik_type_ok = true;
                         break;
                     }
@@ -155,8 +191,8 @@ void enemy::start_dying_class_specific() {
                     continue;
                 }
                 
-                if(p->second->number == random_pellet_spoils[s]) {
-                    possible_pellets.push_back(p->second);
+                if(p.second->number == random_pellet_spoils[s]) {
+                    possible_pellets.push_back(p.second);
                 }
             }
             

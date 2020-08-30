@@ -11,10 +11,11 @@
 #include "pellet_type.h"
 
 #include "../functions.h"
+#include "../game.h"
 #include "../mob_fsms/gen_mob_fsm.h"
 #include "../mob_fsms/pellet_fsm.h"
 #include "../utils/string_utils.h"
-#include "../vars.h"
+
 
 /* ----------------------------------------------------------------------------
  * Creates a type of pellet.
@@ -26,7 +27,7 @@ pellet_type::pellet_type() :
     match_seeds(0),
     non_match_seeds(0),
     bmp_number(nullptr) {
-        
+    
     target_type = MOB_TARGET_TYPE_NONE;
     
     pellet_fsm::create_fsm(this);
@@ -34,42 +35,60 @@ pellet_type::pellet_type() :
 
 
 /* ----------------------------------------------------------------------------
- * Loads parameters from a data file.
+ * Returns the vector of animation conversions.
  */
-void pellet_type::load_parameters(data_node* file) {
-    data_node* pik_type_node = file->get_child_by_name("pikmin_type");
-    if(pikmin_types.find(pik_type_node->value) == pikmin_types.end()) {
+anim_conversion_vector pellet_type::get_anim_conversions() const {
+    anim_conversion_vector v;
+    v.push_back(std::make_pair(ANIM_IDLING, "idling"));
+    return v;
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Loads properties from a data file.
+ * file:
+ *   File to read from.
+ */
+void pellet_type::load_properties(data_node* file) {
+    reader_setter rs(file);
+    
+    string pik_type_str;
+    data_node* pik_type_node = NULL;
+    
+    rs.set("match_seeds", match_seeds);
+    rs.set("non_match_seeds", non_match_seeds);
+    rs.set("number", number);
+    rs.set("pikmin_type", pik_type_str, &pik_type_node);
+    
+    if(
+        game.mob_types.pikmin.find(pik_type_str) ==
+        game.mob_types.pikmin.end()
+    ) {
         log_error(
-            "Unknown Pikmin type \"" + pik_type_node->value + "\"!",
+            "Unknown Pikmin type \"" + pik_type_str + "\"!",
             pik_type_node
         );
     }
+    pik_type = game.mob_types.pikmin[pik_type_str];
     
-    pik_type = pikmin_types[pik_type_node->value];
-    number = s2i(file->get_child_by_name("number")->value);
     weight = number;
-    match_seeds = s2i(file->get_child_by_name("match_seeds")->value);
-    non_match_seeds = s2i(file->get_child_by_name("non_match_seeds")->value);
-    
 }
 
 
 /* ----------------------------------------------------------------------------
  * Loads resources into memory.
+ * file:
+ *   File to read from.
  */
 void pellet_type::load_resources(data_node* file) {
-    bmp_number =
-        bitmaps.get(file->get_child_by_name("number_image")->value, file);
-}
-
-
-/* ----------------------------------------------------------------------------
- * Returns the vector of animation conversions.
- */
-anim_conversion_vector pellet_type::get_anim_conversions() {
-    anim_conversion_vector v;
-    v.push_back(make_pair(ANIM_IDLING, "idling"));
-    return v;
+    reader_setter rs(file);
+    
+    string number_image_str;
+    data_node* number_image_node = NULL;
+    
+    rs.set("number_image", number_image_str, &number_image_node);
+    
+    bmp_number = game.bitmaps.get(number_image_str, number_image_node);
 }
 
 
@@ -77,8 +96,5 @@ anim_conversion_vector pellet_type::get_anim_conversions() {
  * Unloads resources from memory.
  */
 void pellet_type::unload_resources() {
-    bitmaps.detach(bmp_number);
+    game.bitmaps.detach(bmp_number);
 }
-
-
-pellet_type::~pellet_type() { }

@@ -18,7 +18,27 @@
  }]]]>
     </Plugin>
   </Plugins>
+  <VirtualDirectory Name="imgui">
+    <File Name="../source/imgui/imgui_stdlib.h"/>
+    <File Name="../source/imgui/imgui_stdlib.cpp"/>
+    <File Name="../source/imgui/imstb_truetype.h"/>
+    <File Name="../source/imgui/imstb_textedit.h"/>
+    <File Name="../source/imgui/imstb_rectpack.h"/>
+    <File Name="../source/imgui/imgui_widgets.cpp"/>
+    <File Name="../source/imgui/imgui_internal.h"/>
+    <File Name="../source/imgui/imgui_impl_allegro5.h"/>
+    <File Name="../source/imgui/imgui_impl_allegro5.cpp"/>
+    <File Name="../source/imgui/imgui_draw.cpp"/>
+    <File Name="../source/imgui/imgui_demo.cpp"/>
+    <File Name="../source/imgui/imgui.h"/>
+    <File Name="../source/imgui/imgui.cpp"/>
+    <File Name="../source/imgui/imconfig.h"/>
+  </VirtualDirectory>
   <VirtualDirectory Name="mob_fsms">
+    <File Name="../source/mob_fsms/bouncer_fsm.cpp"/>
+    <File Name="../source/mob_fsms/bouncer_fsm.h"/>
+    <File Name="../source/mob_fsms/track_fsm.cpp"/>
+    <File Name="../source/mob_fsms/track_fsm.h"/>
     <File Name="../source/mob_fsms/decoration_fsm.cpp"/>
     <File Name="../source/mob_fsms/decoration_fsm.h"/>
     <File Name="../source/mob_fsms/bridge_fsm.cpp"/>
@@ -47,6 +67,14 @@
     <File Name="../source/mob_fsms/treasure_fsm.h"/>
   </VirtualDirectory>
   <VirtualDirectory Name="mob_types">
+    <File Name="../source/mob_types/bouncer_type.cpp"/>
+    <File Name="../source/mob_types/bouncer_type.h"/>
+    <File Name="../source/mob_types/track_type.cpp"/>
+    <File Name="../source/mob_types/track_type.h"/>
+    <File Name="../source/mob_types/scale_type.cpp"/>
+    <File Name="../source/mob_types/scale_type.h"/>
+    <File Name="../source/mob_types/group_task_type.cpp"/>
+    <File Name="../source/mob_types/group_task_type.h"/>
     <File Name="../source/mob_types/decoration_type.cpp"/>
     <File Name="../source/mob_types/decoration_type.h"/>
     <File Name="../source/mob_types/tool_type.cpp"/>
@@ -81,6 +109,14 @@
     <File Name="../source/mob_types/bridge_type.cpp"/>
   </VirtualDirectory>
   <VirtualDirectory Name="mob_categories">
+    <File Name="../source/mob_categories/bouncer_category.cpp"/>
+    <File Name="../source/mob_categories/bouncer_category.h"/>
+    <File Name="../source/mob_categories/track_category.cpp"/>
+    <File Name="../source/mob_categories/track_category.h"/>
+    <File Name="../source/mob_categories/scale_category.h"/>
+    <File Name="../source/mob_categories/scale_category.cpp"/>
+    <File Name="../source/mob_categories/group_task_category.cpp"/>
+    <File Name="../source/mob_categories/group_task_category.h"/>
     <File Name="../source/mob_categories/decoration_category.cpp"/>
     <File Name="../source/mob_categories/decoration_category.h"/>
     <File Name="../source/mob_categories/tool_category.cpp"/>
@@ -117,6 +153,13 @@
     <File Name="../source/mob_categories/mob_category.cpp"/>
   </VirtualDirectory>
   <VirtualDirectory Name="utils">
+    <File Name="../source/utils/imgui_utils.cpp"/>
+    <File Name="../source/utils/imgui_utils.h"/>
+    <File Name="../source/utils/code_debug.h"/>
+    <File Name="../source/utils/code_debug.cpp"/>
+    <File Name="../source/utils/backtrace.h"/>
+    <File Name="../source/utils/data_file.cpp"/>
+    <File Name="../source/utils/data_file.h"/>
     <File Name="../source/utils/string_utils.cpp"/>
     <File Name="../source/utils/string_utils.h"/>
     <File Name="../source/utils/math_utils.h"/>
@@ -127,6 +170,12 @@
   <Description/>
   <Dependencies/>
   <VirtualDirectory Name="source">
+    <File Name="../source/game_config.cpp"/>
+    <File Name="../source/game_config.h"/>
+    <File Name="../source/options.cpp"/>
+    <File Name="../source/options.h"/>
+    <File Name="../source/game.cpp"/>
+    <File Name="../source/game.h"/>
     <File Name="../source/mob_script_action.cpp"/>
     <File Name="../source/mob_script_action.h"/>
     <File Name="../source/world_component.cpp"/>
@@ -143,12 +192,8 @@
     <File Name="../source/particle.cpp"/>
     <File Name="../source/mob_script.h"/>
     <File Name="../source/hitbox.h"/>
-    <File Name="../source/data_file.h"/>
     <File Name="../source/functions.cpp"/>
-    <File Name="../source/data_file.cpp"/>
     <File Name="../source/hitbox.cpp"/>
-    <File Name="../source/interval.h"/>
-    <File Name="../source/interval.cpp"/>
     <File Name="../source/drawing.cpp"/>
     <File Name="../source/hazard.h"/>
     <File Name="../source/weather.h"/>
@@ -169,9 +214,7 @@
     <File Name="../source/status.h"/>
     <File Name="../source/controls.h"/>
     <File Name="../source/spray_type.cpp"/>
-    <File Name="../source/vars.cpp"/>
     <File Name="../source/const.h"/>
-    <File Name="../source/vars.h"/>
     <File Name="../source/sector.cpp"/>
     <File Name="../source/init.h"/>
     <File Name="../source/hazard.cpp"/>
@@ -181,42 +224,19 @@
     <File Name="../source/load.cpp"/>
     <File Name="../source/gameplay.h"/>
     <File Name="../source/gameplay.cpp"/>
-    <File Name="../source/code_debug.h"/>
-    <File Name="../source/code_debug.cpp"/>
-    <File Name="../source/backtrace.h"/>
     <File Name="../source/replay.h"/>
     <File Name="../source/replay.cpp"/>
   </VirtualDirectory>
-  <VirtualDirectory Name="LAFI">
-    <File Name="../source/LAFI/frame.cpp"/>
-    <File Name="../source/LAFI/gui.cpp"/>
-    <File Name="../source/LAFI/label.cpp"/>
-    <File Name="../source/LAFI/angle_picker.cpp"/>
-    <File Name="../source/LAFI/widget.cpp"/>
-    <File Name="../source/LAFI/scrollbar.cpp"/>
-    <File Name="../source/LAFI/textbox.h"/>
-    <File Name="../source/LAFI/minor.h"/>
-    <File Name="../source/LAFI/label.h"/>
-    <File Name="../source/LAFI/radio_button.h"/>
-    <File Name="../source/LAFI/image.cpp"/>
-    <File Name="../source/LAFI/checkbox.cpp"/>
-    <File Name="../source/LAFI/radio_button.cpp"/>
-    <File Name="../source/LAFI/checkbox.h"/>
-    <File Name="../source/LAFI/frame.h"/>
-    <File Name="../source/LAFI/widget.h"/>
-    <File Name="../source/LAFI/image.h"/>
-    <File Name="../source/LAFI/minor.cpp"/>
-    <File Name="../source/LAFI/scrollbar.h"/>
-    <File Name="../source/LAFI/button.cpp"/>
-    <File Name="../source/LAFI/gui.h"/>
-    <File Name="../source/LAFI/button.h"/>
-    <File Name="../source/LAFI/style.h"/>
-    <File Name="../source/LAFI/angle_picker.h"/>
-    <File Name="../source/LAFI/const.h"/>
-    <File Name="../source/LAFI/style.cpp"/>
-    <File Name="../source/LAFI/textbox.cpp"/>
-  </VirtualDirectory>
   <VirtualDirectory Name="mobs">
+    <File Name="../source/mobs/mob_physics.cpp"/>
+    <File Name="../source/mobs/bouncer.cpp"/>
+    <File Name="../source/mobs/bouncer.h"/>
+    <File Name="../source/mobs/track.cpp"/>
+    <File Name="../source/mobs/track.h"/>
+    <File Name="../source/mobs/scale.cpp"/>
+    <File Name="../source/mobs/scale.h"/>
+    <File Name="../source/mobs/group_task.cpp"/>
+    <File Name="../source/mobs/group_task.h"/>
     <File Name="../source/mobs/decoration.cpp"/>
     <File Name="../source/mobs/decoration.h"/>
     <File Name="../source/mobs/tool.cpp"/>
@@ -255,24 +275,23 @@
   <Dependencies Name="Debug"/>
   <Dependencies Name="Release"/>
   <VirtualDirectory Name="editors">
-    <VirtualDirectory Name="area_editor">
-      <File Name="../source/editors/area_editor/loading.cpp"/>
-      <File Name="../source/editors/area_editor/gui_functions.cpp"/>
-      <File Name="../source/editors/area_editor/event_handling.cpp"/>
-      <File Name="../source/editors/area_editor/editor.h"/>
-      <File Name="../source/editors/area_editor/editor.cpp"/>
-      <File Name="../source/editors/area_editor/drawing.cpp"/>
-    </VirtualDirectory>
     <VirtualDirectory Name="animation_editor">
-      <File Name="../source/editors/animation_editor/drawing.cpp"/>
-      <File Name="../source/editors/animation_editor/loading.cpp"/>
-      <File Name="../source/editors/animation_editor/gui_functions.cpp"/>
+      <File Name="../source/editors/animation_editor/gui.cpp"/>
       <File Name="../source/editors/animation_editor/event_handling.cpp"/>
-      <File Name="../source/editors/animation_editor/editor.h"/>
+      <File Name="../source/editors/animation_editor/drawing.cpp"/>
       <File Name="../source/editors/animation_editor/editor.cpp"/>
+      <File Name="../source/editors/animation_editor/editor.h"/>
     </VirtualDirectory>
-    <File Name="../source/editors/editor.h"/>
     <File Name="../source/editors/editor.cpp"/>
+    <File Name="../source/editors/editor.h"/>
+    <VirtualDirectory Name="area_editor">
+      <File Name="../source/editors/area_editor/gui.cpp"/>
+      <File Name="../source/editors/area_editor/event_handling.cpp"/>
+      <File Name="../source/editors/area_editor/geometry_logic.cpp"/>
+      <File Name="../source/editors/area_editor/drawing.cpp"/>
+      <File Name="../source/editors/area_editor/editor.cpp"/>
+      <File Name="../source/editors/area_editor/editor.h"/>
+    </VirtualDirectory>
   </VirtualDirectory>
   <Settings Type="Executable">
     <GlobalSettings>
@@ -286,7 +305,7 @@
       <ResourceCompiler Options=""/>
     </GlobalSettings>
     <Configuration Name="Debug" CompilerType="clang( tags/RELEASE_380/final )" DebuggerType="GNU gdb debugger" Type="Executable" BuildCmpWithGlobalSettings="append" BuildLnkWithGlobalSettings="append" BuildResWithGlobalSettings="append">
-      <Compiler Options="-Wmain;-g;-O0;-pedantic;-std=c++11;-std=c++0x;-D_GLIBCXX_USE_CXX11_ABI=0;-D_GLIBCXX_DEBUG" C_Options="-g;-O0;-Wall" Assembler="" Required="yes" PreCompiledHeader="" PCHInCommandLine="no" PCHFlags="" PCHFlagsPolicy="0">
+      <Compiler Options="-Wmain;-g;-O0;-pedantic;-std=c++11;-std=c++0x;-D_GLIBCXX_USE_CXX11_ABI=0;-D_GLIBCXX_DEBUG;-DImDrawIdx=int" C_Options="-g;-O0;-Wall" Assembler="" Required="yes" PreCompiledHeader="" PCHInCommandLine="no" PCHFlags="" PCHFlagsPolicy="0">
         <IncludePath Value="."/>
       </Compiler>
       <Linker Options="-lm `pkg-config --libs allegro-5 allegro_audio-5 allegro_image-5 allegro_font-5 allegro_acodec-5 allegro_primitives-5 allegro_dialog-5` -rdynamic" Required="yes"/>

@@ -12,8 +12,8 @@
 
 #include "decoration_category.h"
 
+#include "../game.h"
 #include "../mobs/decoration.h"
-#include "../vars.h"
 
 
 /* ----------------------------------------------------------------------------
@@ -22,29 +22,38 @@
 decoration_category::decoration_category() :
     mob_category(
         MOB_CATEGORY_DECORATIONS, "Decoration", "Decorations",
-        DECORATIONS_FOLDER_PATH, al_map_rgb(160, 180, 160)
+        "Decorations", al_map_rgb(191, 204, 139)
     ) {
     
 }
 
 
 /* ----------------------------------------------------------------------------
- * Returns all types of decoration by name.
+ * Clears the list of registered types of decorations.
  */
-void decoration_category::get_type_names(vector<string> &list) {
-    for(auto t = decoration_types.begin(); t != decoration_types.end(); ++t) {
-        list.push_back(t->first);
+void decoration_category::clear_types() {
+    for(auto &t : game.mob_types.decoration) {
+        delete t.second;
     }
+    game.mob_types.decoration.clear();
 }
 
 
 /* ----------------------------------------------------------------------------
- * Returns a type of decoration given its name, or NULL on error.
+ * Creates a decoration and adds it to the list of decorations.
+ * pos:
+ *   Starting coordinates.
+ * type:
+ *   Mob type.
+ * angle:
+ *   Starting angle.
  */
-mob_type* decoration_category::get_type(const string &name) {
-    auto it = decoration_types.find(name);
-    if(it == decoration_types.end()) return NULL;
-    return it->second;
+mob* decoration_category::create_mob(
+    const point &pos, mob_type* type, const float angle
+) {
+    decoration* m = new decoration(pos, (decoration_type*) type, angle);
+    game.states.gameplay_st->mobs.decorations.push_back(m);
+    return m;
 }
 
 
@@ -57,44 +66,50 @@ mob_type* decoration_category::create_type() {
 
 
 /* ----------------------------------------------------------------------------
- * Registers a created type of decoration.
- */
-void decoration_category::register_type(mob_type* type) {
-    decoration_types[type->name] = (decoration_type*) type;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Creates a decoration and adds it to the list of decorations.
- */
-mob* decoration_category::create_mob(
-    const point &pos, mob_type* type, const float angle
-) {
-    decoration* m = new decoration(pos, (decoration_type*) type, angle);
-    decorations.push_back(m);
-    return m;
-}
-
-
-/* ----------------------------------------------------------------------------
  * Clears a decoration from the list of decorations.
+ * m:
+ *   The mob to erase.
  */
 void decoration_category::erase_mob(mob* m) {
-    decorations.erase(
-        find(decorations.begin(), decorations.end(), (decoration*) m)
+    game.states.gameplay_st->mobs.decorations.erase(
+        find(
+            game.states.gameplay_st->mobs.decorations.begin(),
+            game.states.gameplay_st->mobs.decorations.end(),
+            (decoration*) m
+        )
     );
 }
 
 
 /* ----------------------------------------------------------------------------
- * Clears the list of registered types of decorations.
+ * Returns a type of decoration given its name, or NULL on error.
+ * name:
+ *   Name of the mob type to get.
  */
-void decoration_category::clear_types() {
-    for(auto t = decoration_types.begin(); t != decoration_types.end(); ++t) {
-        delete t->second;
-    }
-    decoration_types.clear();
+mob_type* decoration_category::get_type(const string &name) const {
+    auto it = game.mob_types.decoration.find(name);
+    if(it == game.mob_types.decoration.end()) return NULL;
+    return it->second;
 }
 
 
-decoration_category::~decoration_category() { }
+/* ----------------------------------------------------------------------------
+ * Returns all types of decoration by name.
+ * list:
+ *   This list gets filled with the mob type names.
+ */
+void decoration_category::get_type_names(vector<string> &list) const {
+    for(auto &t : game.mob_types.decoration) {
+        list.push_back(t.first);
+    }
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Registers a created type of decoration.
+ * type:
+ *   Mob type to register.
+ */
+void decoration_category::register_type(mob_type* type) {
+    game.mob_types.decoration[type->name] = (decoration_type*) type;
+}

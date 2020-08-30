@@ -15,11 +15,12 @@
 #include "const.h"
 #include "drawing.h"
 #include "functions.h"
+#include "game.h"
+#include "mobs/group_task.h"
 #include "mobs/pikmin.h"
+#include "mobs/tool.h"
 #include "utils/string_utils.h"
-#include "vars.h"
 
-const float CAMERA_SMOOTHNESS_MULT = 4.5f;
 
 /* ----------------------------------------------------------------------------
  * Ticks the logic of aesthetic things. If the game is paused, these can
@@ -33,104 +34,69 @@ void gameplay::do_aesthetic_logic() {
     *                               `-´  *
     **************************************/
     
-    //"Move group" arrows.
-    if(group_move_magnitude) {
-        group_move_next_arrow_timer.tick(delta_t);
+    //Swarming arrows.
+    if(swarm_magnitude) {
+        swarm_next_arrow_timer.tick(game.delta_t);
     }
     
     dist leader_to_cursor_dist(cur_leader_ptr->pos, leader_cursor_w);
-    for(size_t a = 0; a < group_move_arrows.size(); ) {
-        group_move_arrows[a] += GROUP_MOVE_ARROW_SPEED * delta_t;
+    for(size_t a = 0; a < swarm_arrows.size(); ) {
+        swarm_arrows[a] += SWARM_ARROW_SPEED * game.delta_t;
         
         dist max_dist =
-            (group_move_magnitude > 0) ?
-            cursor_max_dist * group_move_magnitude :
+            (swarm_magnitude > 0) ?
+            game.config.cursor_max_dist * swarm_magnitude :
             leader_to_cursor_dist;
             
-        if(max_dist < group_move_arrows[a]) {
-            group_move_arrows.erase(group_move_arrows.begin() + a);
+        if(max_dist < swarm_arrows[a]) {
+            swarm_arrows.erase(swarm_arrows.begin() + a);
         } else {
             a++;
         }
     }
     
-    whistle_fade_timer.tick(delta_t);
-    
-    if(whistling) {
-        //Create rings.
-        whistle_next_ring_timer.tick(delta_t);
-        
-        if(pretty_whistle) {
-            whistle_next_dot_timer.tick(delta_t);
-        }
-        
-        for(unsigned char d = 0; d < 6; ++d) {
-            if(whistle_dot_radius[d] == -1) continue;
-            
-            whistle_dot_radius[d] += whistle_growth_speed * delta_t;
-            if(
-                whistle_radius > 0 &&
-                whistle_dot_radius[d] > cur_leader_ptr->lea_type->whistle_range
-            ) {
-                whistle_dot_radius[d] = cur_leader_ptr->lea_type->whistle_range;
-                
-            } else if(
-                whistle_fade_radius > 0 &&
-                whistle_dot_radius[d] > whistle_fade_radius
-            ) {
-                whistle_dot_radius[d] = whistle_fade_radius;
-            }
-        }
-    }
-    
-    for(size_t r = 0; r < whistle_rings.size(); ) {
-        //Erase rings that go beyond the cursor.
-        whistle_rings[r] += WHISTLE_RING_SPEED * delta_t;
-        if(leader_to_cursor_dist < whistle_rings[r]) {
-            whistle_rings.erase(whistle_rings.begin() + r);
-            whistle_ring_colors.erase(whistle_ring_colors.begin() + r);
-        } else {
-            r++;
-        }
-    }
-    
-    //Ship beam ring.
-    //The way this works is that the three color components are saved.
-    //Each frame, we increase them or decrease them
-    //(if it reaches 255, set it to decrease, if 0, set it to increase).
-    //Each index increases/decreases at a different speed,
-    //with red being the slowest and blue the fastest.
-    for(unsigned char i = 0; i < 3; ++i) {
-        float dir_mult = (ship_beam_ring_color_up[i]) ? 1.0 : -1.0;
-        signed char addition =
-            dir_mult * SHIP_BEAM_RING_COLOR_SPEED * (i + 1) * delta_t;
-        if(ship_beam_ring_color[i] + addition >= 255) {
-            ship_beam_ring_color[i] = 255;
-            ship_beam_ring_color_up[i] = false;
-        } else if(ship_beam_ring_color[i] + addition <= 0) {
-            ship_beam_ring_color[i] = 0;
-            ship_beam_ring_color_up[i] = true;
-        } else {
-            ship_beam_ring_color[i] += addition;
-        }
-    }
-    
-    //Cursor spin angle and invalidness effect.
-    cursor_invalid_effect += CURSOR_INVALID_EFFECT_SPEED * delta_t;
+    whistle.tick(
+        game.delta_t,
+        cur_leader_ptr->lea_type->whistle_range, leader_to_cursor_dist
+    );
     
     //Cursor trail.
-    if(draw_cursor_trail) {
-        cursor_save_timer.tick(delta_t);
+    if(game.options.draw_cursor_trail) {
+        cursor_save_timer.tick(game.delta_t);
     }
     
-    //Cursor being above or below the leader.
-    //TODO check this only one out of every three frames or something.
+    //Where the cursor is.
     cursor_height_diff_light = 0;
-    sector* cursor_sector =
+    
+    leader_cursor_mob = NULL;
+    for(size_t m = 0; m < mobs.all.size(); ++m) {
+        mob* m_ptr = mobs.all[m];
+        if(!bbox_check(leader_cursor_w, m_ptr->pos, m_ptr->type->max_span)) {
+            //Too far away; of course the cursor isn't on it.
+            continue;
+        }
+        if(
+            leader_cursor_mob &&
+            m_ptr->z + m_ptr->height <
+            leader_cursor_mob->z + leader_cursor_mob->height
+        ) {
+            //If this mob is lower than the previous known "under cursor" mob,
+            //then forget it.
+            continue;
+        }
+        if(dist(leader_cursor_w, m_ptr->pos) > m_ptr->type->radius) {
+            //The cursor is not really on top of this mob.
+            continue;
+        }
+        leader_cursor_mob = m_ptr;
+    }
+    
+    leader_cursor_sector =
         get_sector(leader_cursor_w, NULL, true);
-    if(cursor_sector) {
+        
+    if(leader_cursor_sector) {
         cursor_height_diff_light =
-            (cursor_sector->z - cur_leader_ptr->z) * 0.0033;
+            (leader_cursor_sector->z - cur_leader_ptr->z) * 0.0033;
         cursor_height_diff_light =
             clamp(cursor_height_diff_light, -0.33f, 0.33f);
     }
@@ -140,42 +106,47 @@ void gameplay::do_aesthetic_logic() {
     if(!cur_leader_ptr->holding.empty()) {
         mob* held_mob = cur_leader_ptr->holding[0];
         
-        if(!cursor_sector || cursor_sector->type == SECTOR_TYPE_BLOCKING) {
+        if(
+            !leader_cursor_sector ||
+            leader_cursor_sector->type == SECTOR_TYPE_BLOCKING
+        ) {
             throw_can_reach_cursor = false;
             
         } else {
             float max_throw_z = 0;
             size_t cat = held_mob->type->category->id;
-            if(cat == MOB_CATEGORY_PIKMIN) {
+            switch(cat) {
+            case MOB_CATEGORY_PIKMIN: {
                 max_throw_z =
                     ((pikmin*) held_mob)->pik_type->max_throw_height;
-            } else if(cat == MOB_CATEGORY_LEADERS) {
+                break;
+            } case MOB_CATEGORY_LEADERS: {
                 max_throw_z =
                     ((leader*) held_mob)->lea_type->max_throw_height;
+                break;
+            }
             }
             
             if(max_throw_z > 0) {
                 throw_can_reach_cursor =
-                    cursor_sector->z < cur_leader_ptr->z + max_throw_z;
+                    leader_cursor_sector->z <= cur_leader_ptr->z + max_throw_z;
             }
         }
     }
     
     
     //Specific animations.
-    spark_animation.instance.tick(delta_t);
+    game.sys_assets.spark_animation.instance.tick(game.delta_t);
     
     //Area title fade.
-    area_title_fade_timer.tick(delta_t);
+    area_title_fade_timer.tick(game.delta_t);
     
     //Fade.
-    fade_mgr.tick(delta_t);
+    game.fade_mgr.tick(game.delta_t);
     
     
 }
 
-
-const float CAMERA_BOX_MARGIN = 128.0f;
 
 /* ----------------------------------------------------------------------------
  * Ticks the logic of gameplay-related things.
@@ -183,34 +154,13 @@ const float CAMERA_BOX_MARGIN = 128.0f;
 void gameplay::do_gameplay_logic() {
 
     //Camera movement.
-    cam_pos.x +=
-        (cam_final_pos.x - cam_pos.x) * (CAMERA_SMOOTHNESS_MULT * delta_t);
-    cam_pos.y +=
-        (cam_final_pos.y - cam_pos.y) * (CAMERA_SMOOTHNESS_MULT * delta_t);
-    cam_zoom +=
-        (cam_final_zoom - cam_zoom) * (CAMERA_SMOOTHNESS_MULT * delta_t);
-        
-    game_states[cur_game_state_nr]->update_transformations();
+    game.cam.tick(game.delta_t);
     
-    //Set the camera bounding box.
-    cam_box[0] = point(0, 0);
-    cam_box[1] = point(scr_w, scr_h);
-    al_transform_coordinates(
-        &screen_to_world_transform,
-        &cam_box[0].x,
-        &cam_box[0].y
-    );
-    al_transform_coordinates(
-        &screen_to_world_transform,
-        &cam_box[1].x,
-        &cam_box[1].y
-    );
-    cam_box[0].x -= CAMERA_BOX_MARGIN;
-    cam_box[0].y -= CAMERA_BOX_MARGIN;
-    cam_box[1].x += CAMERA_BOX_MARGIN;
-    cam_box[1].y += CAMERA_BOX_MARGIN;
+    update_transformations();
     
-    if(cur_message.empty()) {
+    game.cam.update_box();
+    
+    if(!msg_box) {
     
         /************************************
         *                              .-.  *
@@ -218,17 +168,66 @@ void gameplay::do_gameplay_logic() {
         *                              `-´  *
         *************************************/
         
-        day_minutes += (day_minutes_per_irl_sec * delta_t);
+        day_minutes += (game.config.day_minutes_per_irl_sec * game.delta_t);
         if(day_minutes > 60 * 24) day_minutes -= 60 * 24;
         
-        area_time_passed += delta_t;
+        area_time_passed += game.delta_t;
+        
+        if(game.perf_mon) {
+            game.perf_mon->start_measurement("Logic -- Particles");
+        }
         
         //Tick all particles.
-        particles.tick_all(delta_t);
+        particles.tick_all(game.delta_t);
+        
+        if(game.perf_mon) {
+            game.perf_mon->finish_measurement();
+        }
         
         //Ticks all status effect animations.
-        for(auto s = status_types.begin(); s != status_types.end(); ++s) {
-            s->second.anim_instance.tick(delta_t);
+        for(auto &s : game.status_types) {
+            s.second->anim_instance.tick(game.delta_t);
+        }
+        
+        
+        /*******************
+        *             +--+ *
+        *   Sectors   |  | *
+        *             +--+ *
+        ********************/
+        if(game.perf_mon) {
+            game.perf_mon->start_measurement("Logic -- Sector animation");
+        }
+        
+        for(size_t s = 0; s < game.cur_area_data.sectors.size(); ++s) {
+            sector* s_ptr = game.cur_area_data.sectors[s];
+            
+            if(s_ptr->draining_liquid) {
+            
+                s_ptr->liquid_drain_left -= game.delta_t;
+                
+                if(s_ptr->liquid_drain_left <= 0) {
+                
+                    for(size_t h = 0; h < s_ptr->hazards.size();) {
+                        if(s_ptr->hazards[h]->associated_liquid) {
+                            s_ptr->hazards.erase(s_ptr->hazards.begin() + h);
+                        } else {
+                            ++h;
+                        }
+                    }
+                    
+                    s_ptr->liquid_drain_left = 0;
+                    s_ptr->draining_liquid = false;
+                }
+            }
+            
+            if(s_ptr->scroll.x != 0 || s_ptr->scroll.y != 0) {
+                s_ptr->texture_info.translation += s_ptr->scroll * game.delta_t;
+            }
+        }
+        
+        if(game.perf_mon) {
+            game.perf_mon->finish_measurement();
         }
         
         
@@ -239,12 +238,12 @@ void gameplay::do_gameplay_logic() {
         ********************/
         
         if(
-            whistling &&
-            whistle_radius < cur_leader_ptr->lea_type->whistle_range
+            whistle.whistling &&
+            whistle.radius < cur_leader_ptr->lea_type->whistle_range
         ) {
-            whistle_radius += whistle_growth_speed * delta_t;
-            if(whistle_radius > cur_leader_ptr->lea_type->whistle_range) {
-                whistle_radius = cur_leader_ptr->lea_type->whistle_range;
+            whistle.radius += game.config.whistle_growth_speed * game.delta_t;
+            if(whistle.radius > cur_leader_ptr->lea_type->whistle_range) {
+                whistle.radius = cur_leader_ptr->lea_type->whistle_range;
             }
         }
         
@@ -254,12 +253,11 @@ void gameplay::do_gameplay_logic() {
         *   Mobs   ()--> *
         *                *
         ******************/
-        
-        size_t n_mobs = mobs.size();
+        size_t n_mobs = mobs.all.size();
         for(size_t m = 0; m < n_mobs; ++m) {
             //Tick the mob.
-            mob* m_ptr = mobs[m];
-            m_ptr->tick();
+            mob* m_ptr = mobs.all[m];
+            m_ptr->tick(game.delta_t);
             
             if(m_ptr->fsm.cur_state) {
                 process_mob_interactions(m_ptr, m);
@@ -268,7 +266,7 @@ void gameplay::do_gameplay_logic() {
         
         for(size_t m = 0; m < n_mobs;) {
             //Mob deletion.
-            mob* m_ptr = mobs[m];
+            mob* m_ptr = mobs.all[m];
             if(m_ptr->to_delete) {
                 delete_mob(m_ptr);
                 n_mobs--;
@@ -283,8 +281,9 @@ void gameplay::do_gameplay_logic() {
         *   Leader   (*:O) *
         *             `-´  *
         *******************/
-        //TODO move this logic to the leader class once
-        //multiplayer logic is implemented.
+        if(game.perf_mon) {
+            game.perf_mon->start_measurement("Logic -- Current leader");
+        }
         
         //Current leader movement.
         point dummy_coords;
@@ -295,15 +294,15 @@ void gameplay::do_gameplay_logic() {
         );
         if(leader_move_magnitude < 0.75) {
             cur_leader_ptr->fsm.run_event(
-                LEADER_EVENT_MOVE_END, (void*) &leader_movement
+                LEADER_EV_MOVE_END, (void*) &leader_movement
             );
         } else {
             cur_leader_ptr->fsm.run_event(
-                LEADER_EVENT_MOVE_START, (void*) &leader_movement
+                LEADER_EV_MOVE_START, (void*) &leader_movement
             );
         }
         
-        cam_final_pos = cur_leader_ptr->pos;
+        game.cam.target_pos = cur_leader_ptr->pos;
         
         //Check proximity with certain key things.
         if(!cur_leader_ptr->auto_plucking) {
@@ -312,10 +311,10 @@ void gameplay::do_gameplay_logic() {
             bool done = false;
             
             close_to_ship_to_heal = NULL;
-            for(size_t s = 0; s < ships.size(); ++s) {
-                ship* s_ptr = ships[s];
+            for(size_t s = 0; s < mobs.ships.size(); ++s) {
+                ship* s_ptr = mobs.ships[s];
                 d = dist(cur_leader_ptr->pos, s_ptr->pos);
-                if(!s_ptr->is_leader_under_ring(cur_leader_ptr)) {
+                if(!s_ptr->is_leader_under_beam(cur_leader_ptr)) {
                     continue;
                 }
                 if(cur_leader_ptr->health == cur_leader_ptr->type->max_health) {
@@ -336,7 +335,7 @@ void gameplay::do_gameplay_logic() {
             close_to_pikmin_to_pluck = NULL;
             if(!done) {
                 pikmin* p = get_closest_sprout(cur_leader_ptr->pos, &d, false);
-                if(p && d <= pluck_range) {
+                if(p && d <= game.config.pluck_range) {
                     close_to_pikmin_to_pluck = p;
                     done = true;
                 }
@@ -346,11 +345,11 @@ void gameplay::do_gameplay_logic() {
             d = 0;
             close_to_onion_to_open = NULL;
             if(!done) {
-                for(size_t o = 0; o < onions.size(); ++o) {
-                    d = dist(cur_leader_ptr->pos, onions[o]->pos);
-                    if(d > onion_open_range) continue;
+                for(size_t o = 0; o < mobs.onions.size(); ++o) {
+                    d = dist(cur_leader_ptr->pos, mobs.onions[o]->pos);
+                    if(d > game.config.onion_open_range) continue;
                     if(d < closest_d || !close_to_onion_to_open) {
-                        close_to_onion_to_open = onions[o];
+                        close_to_onion_to_open = mobs.onions[o];
                         closest_d = d;
                         done = true;
                     }
@@ -361,17 +360,74 @@ void gameplay::do_gameplay_logic() {
             d = 0;
             close_to_interactable_to_use = NULL;
             if(!done) {
-                for(size_t i = 0; i < interactables.size(); ++i) {
-                    d = dist(cur_leader_ptr->pos, interactables[i]->pos);
-                    if(d > interactables[i]->int_type->trigger_range) continue;
+                for(size_t i = 0; i < mobs.interactables.size(); ++i) {
+                    d = dist(cur_leader_ptr->pos, mobs.interactables[i]->pos);
+                    if(d > mobs.interactables[i]->int_type->trigger_range) {
+                        continue;
+                    }
                     if(d < closest_d || !close_to_interactable_to_use) {
-                        close_to_interactable_to_use = interactables[i];
+                        close_to_interactable_to_use = mobs.interactables[i];
                         closest_d = d;
                         done = true;
                     }
                 }
             }
         }
+        
+        
+        /********************
+        *             .-.   *
+        *   Cursor   ( = )> *
+        *             `-´   *
+        ********************/
+        
+        point mouse_cursor_speed;
+        float dummy_magnitude;
+        cursor_movement.get_clean_info(
+            &mouse_cursor_speed, &dummy_angle, &dummy_magnitude
+        );
+        mouse_cursor_speed =
+            mouse_cursor_speed * game.delta_t* MOUSE_CURSOR_MOVE_SPEED;
+            
+        game.mouse_cursor_s += mouse_cursor_speed;
+        
+        game.mouse_cursor_w = game.mouse_cursor_s;
+        al_transform_coordinates(
+            &game.screen_to_world_transform,
+            &game.mouse_cursor_w.x, &game.mouse_cursor_w.y
+        );
+        leader_cursor_w = game.mouse_cursor_w;
+        
+        float cursor_angle = get_angle(cur_leader_ptr->pos, leader_cursor_w);
+        
+        dist leader_to_cursor_dist(cur_leader_ptr->pos, leader_cursor_w);
+        if(leader_to_cursor_dist > game.config.cursor_max_dist) {
+            //Cursor goes beyond the range limit.
+            leader_cursor_w.x =
+                cur_leader_ptr->pos.x +
+                (cos(cursor_angle) * game.config.cursor_max_dist);
+            leader_cursor_w.y =
+                cur_leader_ptr->pos.y +
+                (sin(cursor_angle) * game.config.cursor_max_dist);
+                
+            if(mouse_cursor_speed.x != 0 || mouse_cursor_speed.y != 0) {
+                //If we're speeding the mouse cursor (via analog stick),
+                //don't let it go beyond the edges.
+                game.mouse_cursor_w = leader_cursor_w;
+                game.mouse_cursor_s = game.mouse_cursor_w;
+                al_transform_coordinates(
+                    &game.world_to_screen_transform,
+                    &game.mouse_cursor_s.x, &game.mouse_cursor_s.y
+                );
+            }
+        }
+        
+        leader_cursor_s = leader_cursor_w;
+        al_transform_coordinates(
+            &game.world_to_screen_transform,
+            &leader_cursor_s.x, &leader_cursor_s.y
+        );
+        
         
         /***********************************
         *                             ***  *
@@ -391,90 +447,37 @@ void gameplay::do_gameplay_logic() {
             update_closest_group_member();
         }
         
-        float old_group_move_magnitude = group_move_magnitude;
-        point group_move_coords;
-        float new_group_move_angle;
-        group_movement.get_clean_info(
-            &group_move_coords, &new_group_move_angle, &group_move_magnitude
+        float old_swarm_magnitude = swarm_magnitude;
+        point swarm_coords;
+        float new_swarm_angle;
+        swarm_movement.get_clean_info(
+            &swarm_coords, &new_swarm_angle, &swarm_magnitude
         );
-        if(group_move_magnitude > 0) {
+        if(swarm_magnitude > 0) {
             //This stops arrows that were fading away to the left from
             //turning to angle 0 because the magnitude reached 0.
-            group_move_angle = new_group_move_angle;
+            swarm_angle = new_swarm_angle;
         }
         
-        if(group_move_cursor) {
-            group_move_angle = cursor_angle;
+        if(swarm_cursor) {
+            swarm_angle = cursor_angle;
             float leader_to_cursor_dist =
                 dist(cur_leader_ptr->pos, leader_cursor_w).to_float();
-            group_move_magnitude =
-                leader_to_cursor_dist / cursor_max_dist;
+            swarm_magnitude =
+                leader_to_cursor_dist / game.config.cursor_max_dist;
         }
         
-        if(old_group_move_magnitude != group_move_magnitude) {
-            if(group_move_magnitude != 0) {
-                cur_leader_ptr->signal_group_move_start();
+        if(old_swarm_magnitude != swarm_magnitude) {
+            if(swarm_magnitude != 0) {
+                cur_leader_ptr->signal_swarm_start();
             } else {
-                cur_leader_ptr->signal_group_move_end();
+                cur_leader_ptr->signal_swarm_end();
             }
         }
         
-        
-        /********************
-        *             .-.   *
-        *   Cursor   ( = )> *
-        *             `-´   *
-        ********************/
-        
-        point mouse_cursor_speed;
-        float dummy_magnitude;
-        cursor_movement.get_clean_info(
-            &mouse_cursor_speed, &dummy_angle, &dummy_magnitude
-        );
-        mouse_cursor_speed =
-            mouse_cursor_speed * delta_t* MOUSE_CURSOR_MOVE_SPEED;
-            
-        mouse_cursor_s += mouse_cursor_speed;
-        
-        mouse_cursor_w = mouse_cursor_s;
-        al_transform_coordinates(
-            &screen_to_world_transform,
-            &mouse_cursor_w.x, &mouse_cursor_w.y
-        );
-        leader_cursor_w = mouse_cursor_w;
-        
-        cursor_angle =
-            get_angle(cur_leader_ptr->pos, leader_cursor_w);
-            
-        dist leader_to_cursor_dist(cur_leader_ptr->pos, leader_cursor_w);
-        if(leader_to_cursor_dist > cursor_max_dist) {
-            //TODO with an analog stick, if the cursor is being moved,
-            //it's considered off-limit a lot more than it should.
-            
-            //Cursor goes beyond the range limit.
-            leader_cursor_w.x =
-                cur_leader_ptr->pos.x + (cos(cursor_angle) * cursor_max_dist);
-            leader_cursor_w.y =
-                cur_leader_ptr->pos.y + (sin(cursor_angle) * cursor_max_dist);
-                
-            if(mouse_cursor_speed.x != 0 || mouse_cursor_speed.y != 0) {
-                //If we're speeding the mouse cursor (via analog stick),
-                //don't let it go beyond the edges.
-                mouse_cursor_w = leader_cursor_w;
-                mouse_cursor_s = mouse_cursor_w;
-                al_transform_coordinates(
-                    &world_to_screen_transform,
-                    &mouse_cursor_s.x, &mouse_cursor_s.y
-                );
-            }
+        if(game.perf_mon) {
+            game.perf_mon->finish_measurement();
         }
-        
-        leader_cursor_s = leader_cursor_w;
-        al_transform_coordinates(
-            &world_to_screen_transform,
-            &leader_cursor_s.x, &leader_cursor_s.y
-        );
-        
         
         
         /**************************
@@ -517,65 +520,54 @@ void gameplay::do_gameplay_logic() {
         *   Liquids    ~ ~  *
         *             ~ ~ ~ *
         ********************/
-        for(auto l = liquids.begin(); l != liquids.end(); ++l) {
-            l->second.anim_instance.tick(delta_t);
+        for(auto &l : game.liquids) {
+            l.second->anim_instance.tick(game.delta_t);
         }
         
     } else { //Displaying a message.
     
-        if(
-            cur_message_char <
-            cur_message_stopping_chars[cur_message_section + 1]
-        ) {
-            if(cur_message_char_timer.duration == 0.0f) {
-                size_t stopping_char =
-                    cur_message_stopping_chars[cur_message_section + 1];
-                //Display everything right away.
-                cur_message_char = stopping_char;
-            } else {
-                cur_message_char_timer.tick(delta_t);
-            }
-        }
-        
+        msg_box->tick(game.delta_t);
     }
     
-    hud_items.tick(delta_t);
-    replay_timer.tick(delta_t);
+    hud_items.tick(game.delta_t);
+    
+    replay_timer.tick(game.delta_t);
     
     //Process and print framerate and system info.
-    if(show_system_info) {
+    if(game.show_system_info) {
     
-        framerate_history.push_back(1.0 / delta_t);
-        if(framerate_history.size() > FRAMERATE_HISTORY_SIZE) {
-            framerate_history.erase(framerate_history.begin());
+        game.framerate_history.push_back(1.0f / game.delta_t);
+        if(game.framerate_history.size() > FRAMERATE_HISTORY_SIZE) {
+            game.framerate_history.erase(game.framerate_history.begin());
         }
         
-        framerate_last_avg_point++;
+        game.framerate_last_avg_point++;
         
         float sample_avg;
         
-        if(framerate_last_avg_point >= FRAMERATE_AVG_SAMPLE_SIZE) {
+        if(game.framerate_last_avg_point >= FRAMERATE_AVG_SAMPLE_SIZE) {
             //Let's get an average, using FRAMERATE_AVG_SAMPLE_SIZE frames.
             //If we can fit a sample of this size using the most recent
             //unsampled frames, then use those. Otherwise, keep using the last
             //block, which starts at framerate_last_avg_point.
             //This makes it so the average stays the same for a bit of time,
             //so the player can actually read it.
-            if(framerate_last_avg_point > FRAMERATE_AVG_SAMPLE_SIZE * 2) {
-                framerate_last_avg_point = FRAMERATE_AVG_SAMPLE_SIZE;
+            if(game.framerate_last_avg_point > FRAMERATE_AVG_SAMPLE_SIZE * 2) {
+                game.framerate_last_avg_point = FRAMERATE_AVG_SAMPLE_SIZE;
             }
             float sample_avg_sum = 0;
             size_t sample_avg_point_count = 0;
             size_t sample_size =
-                min(
+                std::min(
                     (size_t) FRAMERATE_AVG_SAMPLE_SIZE,
-                    framerate_history.size()
+                    game.framerate_history.size()
                 );
                 
             for(size_t f = 0; f < sample_size; ++f) {
                 size_t idx =
-                    framerate_history.size() - framerate_last_avg_point + f;
-                sample_avg_sum += framerate_history[idx];
+                    game.framerate_history.size() -
+                    game.framerate_last_avg_point + f;
+                sample_avg_sum += game.framerate_history[idx];
                 sample_avg_point_count++;
             }
             
@@ -587,30 +579,30 @@ void gameplay::do_gameplay_logic() {
             //that. This defeats the purpose of a smoothly-updating number,
             //so until that requirement is filled, let's stick to the oldest
             //record.
-            sample_avg = framerate_history[0];
+            sample_avg = game.framerate_history[0];
             
         }
         
         string fps_str =
             box_string(f2s(sample_avg), 12, " avg, ") +
-            box_string(f2s(1.0 / delta_t), 12, " now, ") +
-            i2s(game_fps) + " intended";
+            box_string(f2s(1.0f / game.delta_t), 12, " now, ") +
+            i2s(game.options.target_fps) + " intended";
         string n_mobs_str =
-            box_string(i2s(mobs.size()), 7);
+            box_string(i2s(mobs.all.size()), 7);
         string n_particles_str =
             box_string(i2s(particles.get_count()), 7);
         string resolution_str =
-            i2s(scr_w) + "x" + i2s(scr_h);
+            i2s(game.win_w) + "x" + i2s(game.win_h);
         string area_v_str =
-            cur_area_data.version;
-        string area_creator_str =
-            cur_area_data.creator;
+            game.cur_area_data.version;
+        string area_maker_str =
+            game.cur_area_data.maker;
         string engine_v_str =
             i2s(VERSION_MAJOR) + "." +
             i2s(VERSION_MINOR) + "." +
             i2s(VERSION_REV);
         string game_v_str =
-            game_version;
+            game.config.version;
             
         print_info(
             "FPS: " + fps_str +
@@ -619,7 +611,7 @@ void gameplay::do_gameplay_logic() {
             "\n"
             "Resolution: " + resolution_str +
             "\n"
-            "Area version " + area_v_str + ", by " + area_creator_str +
+            "Area version " + area_v_str + ", by " + area_maker_str +
             "\n"
             "Pikifen version " + engine_v_str +
             ", game version " + game_v_str,
@@ -627,51 +619,51 @@ void gameplay::do_gameplay_logic() {
         );
         
     } else {
-        framerate_last_avg_point = 0;
-        framerate_history.clear();
+        game.framerate_last_avg_point = 0;
+        game.framerate_history.clear();
     }
     
     //Print info on a mob.
-    if(creator_tool_info_lock) {
+    if(game.maker_tools.info_lock) {
         string name_str =
-            box_string(creator_tool_info_lock->type->name, 26);
+            box_string(game.maker_tools.info_lock->type->name, 26);
         string coords_str =
             box_string(
-                box_string(f2s(creator_tool_info_lock->pos.x), 8, " ") +
-                box_string(f2s(creator_tool_info_lock->pos.y), 8, " ") +
-                box_string(f2s(creator_tool_info_lock->z), 7),
+                box_string(f2s(game.maker_tools.info_lock->pos.x), 8, " ") +
+                box_string(f2s(game.maker_tools.info_lock->pos.y), 8, " ") +
+                box_string(f2s(game.maker_tools.info_lock->z), 7),
                 23
             );
         string state_h_str =
             (
-                creator_tool_info_lock->fsm.cur_state ?
-                creator_tool_info_lock->fsm.cur_state->name :
+                game.maker_tools.info_lock->fsm.cur_state ?
+                game.maker_tools.info_lock->fsm.cur_state->name :
                 "(None!)"
             );
         for(unsigned char p = 0; p < STATE_HISTORY_SIZE; ++p) {
             state_h_str +=
-                " " + creator_tool_info_lock->fsm.prev_state_names[p];
+                " " + game.maker_tools.info_lock->fsm.prev_state_names[p];
         }
         string anim_str =
-            creator_tool_info_lock->anim.cur_anim ?
-            creator_tool_info_lock->anim.cur_anim->name :
+            game.maker_tools.info_lock->anim.cur_anim ?
+            game.maker_tools.info_lock->anim.cur_anim->name :
             "(None!)";
         string health_str =
             box_string(
-                box_string(f2s(creator_tool_info_lock->health), 6) +
+                box_string(f2s(game.maker_tools.info_lock->health), 6) +
                 " / " +
                 box_string(
-                    f2s(creator_tool_info_lock->type->max_health), 6
+                    f2s(game.maker_tools.info_lock->type->max_health), 6
                 ),
                 23
             );
         string timer_str =
-            f2s(creator_tool_info_lock->script_timer.time_left);
+            f2s(game.maker_tools.info_lock->script_timer.time_left);
         string vars_str;
-        if(!creator_tool_info_lock->vars.empty()) {
+        if(!game.maker_tools.info_lock->vars.empty()) {
             for(
-                auto v = creator_tool_info_lock->vars.begin();
-                v != creator_tool_info_lock->vars.end(); ++v
+                auto v = game.maker_tools.info_lock->vars.begin();
+                v != game.maker_tools.info_lock->vars.end(); ++v
             ) {
                 vars_str += v->first + "=" + v->second + "; ";
             }
@@ -696,18 +688,19 @@ void gameplay::do_gameplay_logic() {
     }
     
     //Print mouse coordinates.
-    if(creator_tool_geometry_info) {
+    if(game.maker_tools.geometry_info) {
         sector* mouse_sector =
-            get_sector(mouse_cursor_w, NULL, true);
+            get_sector(game.mouse_cursor_w, NULL, true);
             
         string coords_str =
-            box_string(f2s(mouse_cursor_w.x), 6) + " " +
-            box_string(f2s(mouse_cursor_w.y), 6);
+            box_string(f2s(game.mouse_cursor_w.x), 6) + " " +
+            box_string(f2s(game.mouse_cursor_w.y), 6);
         string blockmap_str =
             box_string(
-                i2s(cur_area_data.bmap.get_col(mouse_cursor_w.x)), 5, " "
+                i2s(game.cur_area_data.bmap.get_col(game.mouse_cursor_w.x)),
+                5, " "
             ) +
-            i2s(cur_area_data.bmap.get_row(mouse_cursor_w.y));
+            i2s(game.cur_area_data.bmap.get_row(game.mouse_cursor_w.y));
         string sector_z_str, sector_light_str, sector_tex_str;
         if(mouse_sector) {
             sector_z_str =
@@ -738,7 +731,7 @@ void gameplay::do_gameplay_logic() {
         print_info(str, 1.0f, 1.0f);
     }
     
-    info_print_timer.tick(delta_t);
+    game.maker_tools.info_print_timer.tick(game.delta_t);
     
     if(!ready_for_input) {
         ready_for_input = true;
@@ -751,24 +744,38 @@ void gameplay::do_gameplay_logic() {
 /* ----------------------------------------------------------------------------
  * Handles the logic required to tick a specific mob and its interactions
  * with other mobs.
+ * m_ptr:
+ *   Mob to process.
+ * m:
+ *   Index of the mob.
  */
 void gameplay::process_mob_interactions(mob* m_ptr, size_t m) {
     vector<pending_intermob_event> pending_intermob_events;
     mob_state* state_before = m_ptr->fsm.cur_state;
     
-    size_t n_mobs = mobs.size();
+    size_t n_mobs = mobs.all.size();
     for(size_t m2 = 0; m2 < n_mobs; ++m2) {
         if(m == m2) continue;
         
-        mob* m2_ptr = mobs[m2];
+        mob* m2_ptr = mobs.all[m2];
         if(m2_ptr->to_delete) continue;
         
         dist d(m_ptr->pos, m2_ptr->pos);
+        
+        if(game.perf_mon) {
+            game.perf_mon->start_measurement("Objects -- Touching others");
+        }
         
         if(d <= m_ptr->type->max_span + m2_ptr->type->max_span) {
             //Only check if their radii or hitboxes
             //can (theoretically) reach each other.
             process_mob_touches(m_ptr, m2_ptr, m, m2, d);
+            
+        }
+        
+        if(game.perf_mon) {
+            game.perf_mon->finish_measurement();
+            game.perf_mon->start_measurement("Objects -- Reaches");
         }
         
         if(
@@ -780,9 +787,22 @@ void gameplay::process_mob_interactions(mob* m_ptr, size_t m) {
             );
         }
         
+        if(game.perf_mon) {
+            game.perf_mon->finish_measurement();
+            game.perf_mon->start_measurement("Objects -- Misc. interactions");
+        }
+        
         process_mob_misc_interactions(
             m_ptr, m2_ptr, m, m2, d, pending_intermob_events
         );
+        
+        if(game.perf_mon) {
+            game.perf_mon->finish_measurement();
+        }
+    }
+    
+    if(game.perf_mon) {
+        game.perf_mon->start_measurement("Objects -- Interaction results");
     }
     
     //Check the pending inter-mob events.
@@ -813,17 +833,26 @@ void gameplay::process_mob_interactions(mob* m_ptr, size_t m) {
         
     }
     
+    if(game.perf_mon) {
+        game.perf_mon->finish_measurement();
+    }
 }
 
 
 /* ----------------------------------------------------------------------------
  * Handles the logic between m_ptr and m2_ptr regarding miscellaneous things.
- * m_ptr:                   Mob that's being processed.
- * m2_ptr:                  Check against this mob.
- * m:                       Index of the mob being processed.
- * m2:                      Index of the mob to check against.
- * d:                       Distance between the two.
- * pending_intermob_events: Vector of events to be processed.
+ * m_ptr:
+ *   Mob that's being processed.
+ * m2_ptr:
+ *   Check against this mob.
+ * m:
+ *   Index of the mob being processed.
+ * m2:
+ *   Index of the mob to check against.
+ * d:
+ *   Distance between the two.
+ * pending_intermob_events:
+ *   Vector of events to be processed.
  */
 void gameplay::process_mob_misc_interactions(
     mob* m_ptr, mob* m2_ptr, const size_t m, const size_t m2, dist &d,
@@ -831,7 +860,7 @@ void gameplay::process_mob_misc_interactions(
 ) {
     //Find a carriable mob to grab.
     mob_event* nco_event =
-        q_get_event(m_ptr, MOB_EVENT_NEAR_CARRIABLE_OBJECT);
+        q_get_event(m_ptr, MOB_EV_NEAR_CARRIABLE_OBJECT);
     if(
         nco_event &&
         m2_ptr->carry_info &&
@@ -850,7 +879,7 @@ void gameplay::process_mob_misc_interactions(
     
     //Find a tool mob.
     mob_event* nto_event =
-        q_get_event(m_ptr, MOB_EVENT_NEAR_TOOL);
+        q_get_event(m_ptr, MOB_EV_NEAR_TOOL);
     if(
         nto_event &&
         d <=
@@ -866,18 +895,45 @@ void gameplay::process_mob_misc_interactions(
             );
         }
     }
+    
+    //Find a group task mob.
+    mob_event* ngto_event =
+        q_get_event(m_ptr, MOB_EV_NEAR_GROUP_TASK);
+    if(
+        ngto_event &&
+        m2_ptr->health > 0 &&
+        d <=
+        m_ptr->type->radius + m2_ptr->type->radius + task_range(m_ptr) &&
+        typeid(*m2_ptr) == typeid(group_task)
+    ) {
+        group_task* tas_ptr = (group_task*) m2_ptr;
+        group_task::group_task_spot* free_spot = tas_ptr->get_free_spot();
+        if(!free_spot) {
+            //There are no free spots here. Ignore it.
+        } else {
+            pending_intermob_events.push_back(
+                pending_intermob_event(d, ngto_event, m2_ptr)
+            );
+        }
+    }
 }
 
 
 /* ----------------------------------------------------------------------------
  * Handles the logic between m_ptr and m2_ptr regarding everything involving
  * one being in the other's reach.
- * m_ptr:                   Mob that's being processed.
- * m2_ptr:                  Check against this mob.
- * m:                       Index of the mob being processed.
- * m2:                      Index of the mob to check against.
- * d:                       Distance between the two.
- * pending_intermob_events: Vector of events to be processed.
+ * m_ptr:
+ *   Mob that's being processed.
+ * m2_ptr:
+ *   Check against this mob.
+ * m:
+ *   Index of the mob being processed.
+ * m2:
+ *   Index of the mob to check against.
+ * d:
+ *   Distance between the two.
+ * pending_intermob_events:
+ *   Vector of events to be processed.
  */
 void gameplay::process_mob_reaches(
     mob* m_ptr, mob* m2_ptr, const size_t m, const size_t m2, dist &d,
@@ -885,9 +941,9 @@ void gameplay::process_mob_reaches(
 ) {
     //Check reaches.
     mob_event* obir_ev =
-        q_get_event(m_ptr, MOB_EVENT_OBJECT_IN_REACH);
+        q_get_event(m_ptr, MOB_EV_OBJECT_IN_REACH);
     mob_event* opir_ev =
-        q_get_event(m_ptr, MOB_EVENT_OPPONENT_IN_REACH);
+        q_get_event(m_ptr, MOB_EV_OPPONENT_IN_REACH);
         
     mob_type::reach_struct* r_ptr =
         &m_ptr->type->reaches[m_ptr->near_reach];
@@ -933,11 +989,16 @@ void gameplay::process_mob_reaches(
 /* ----------------------------------------------------------------------------
  * Handles the logic between m_ptr and m2_ptr regarding everything involving
  * one touching the other.
- * m_ptr:        Mob that's being processed.
- * m2_ptr:       Check against this mob.
- * m:            Index of the mob being processed.
- * m2:           Index of the mob to check against.
- * d:            Distance between the two.
+ * m_ptr:
+ *   Mob that's being processed.
+ * m2_ptr:
+ *   Check against this mob.
+ * m:
+ *   Index of the mob being processed.
+ * m2:
+ *   Index of the mob to check against.
+ * d:
+ *   Distance between the two.
  */
 void gameplay::process_mob_touches(
     mob* m_ptr, mob* m2_ptr, const size_t m, const size_t m2, dist &d
@@ -947,14 +1008,15 @@ void gameplay::process_mob_touches(
         m2_ptr->type->pushes &&
         m2_ptr->tangible &&
         m_ptr->type->pushable && !m_ptr->unpushable &&
+        m_ptr->standing_on_mob != m2_ptr &&
         (
             (
-                m2_ptr->z < m_ptr->z + m_ptr->type->height &&
-                m2_ptr->z + m2_ptr->type->height > m_ptr->z
+                m2_ptr->z < m_ptr->z + m_ptr->height &&
+                m2_ptr->z + m2_ptr->height > m_ptr->z
             ) || (
-                m_ptr->type->height == 0
+                m_ptr->height == 0
             ) || (
-                m2_ptr->type->height == 0
+                m2_ptr->height == 0
             )
         ) && !(
             //If they are both being carried by Pikmin, one of them
@@ -1052,7 +1114,7 @@ void gameplay::process_mob_touches(
         //If the mob is inside the other,
         //it needs to be pushed out.
         if(push_amount > m_ptr->push_amount) {
-            m_ptr->push_amount = push_amount / delta_t;
+            m_ptr->push_amount = push_amount / game.delta_t;
             m_ptr->push_angle = push_angle;
         }
     }
@@ -1061,13 +1123,13 @@ void gameplay::process_mob_touches(
     //Check touches. This does not use hitboxes,
     //only the object radii (or rectangular width/height).
     mob_event* touch_op_ev =
-        q_get_event(m_ptr, MOB_EVENT_TOUCHED_OPPONENT);
+        q_get_event(m_ptr, MOB_EV_TOUCHED_OPPONENT);
     mob_event* touch_le_ev =
-        q_get_event(m_ptr, MOB_EVENT_TOUCHED_ACTIVE_LEADER);
+        q_get_event(m_ptr, MOB_EV_TOUCHED_ACTIVE_LEADER);
     mob_event* touch_ob_ev =
-        q_get_event(m_ptr, MOB_EVENT_TOUCHED_OBJECT);
+        q_get_event(m_ptr, MOB_EV_TOUCHED_OBJECT);
     mob_event* pik_land_ev =
-        q_get_event(m_ptr, MOB_EVENT_PIKMIN_LANDED);
+        q_get_event(m_ptr, MOB_EV_THROWN_PIKMIN_LANDED);
     if(
         touch_op_ev || touch_le_ev ||
         touch_ob_ev || pik_land_ev
@@ -1075,15 +1137,15 @@ void gameplay::process_mob_touches(
     
         bool z_touch;
         if(
-            m_ptr->type->height == 0 ||
-            m2_ptr->type->height == 0
+            m_ptr->height == 0 ||
+            m2_ptr->height == 0
         ) {
             z_touch = true;
         } else {
             z_touch =
                 !(
-                    (m2_ptr->z > m_ptr->z + m_ptr->type->height) ||
-                    (m2_ptr->z + m2_ptr->type->height < m_ptr->z)
+                    (m2_ptr->z > m_ptr->z + m_ptr->height) ||
+                    (m2_ptr->z + m2_ptr->height < m_ptr->z)
                 );
         }
         
@@ -1145,25 +1207,25 @@ void gameplay::process_mob_touches(
     }
     
     //Check hitbox touches.
-    mob_event* hitbox_touch_n_ev =
-        q_get_event(m_ptr, MOB_EVENT_HITBOX_TOUCH_N);
+    mob_event* hitbox_touch_an_ev =
+        q_get_event(m_ptr, MOB_EV_HITBOX_TOUCH_A_N);
     mob_event* hitbox_touch_na_ev =
-        q_get_event(m_ptr, MOB_EVENT_HITBOX_TOUCH_N_A);
+        q_get_event(m_ptr, MOB_EV_HITBOX_TOUCH_N_A);
     mob_event* hitbox_touch_eat_ev =
-        q_get_event(m_ptr, MOB_EVENT_HITBOX_TOUCH_EAT);
+        q_get_event(m_ptr, MOB_EV_HITBOX_TOUCH_EAT);
     mob_event* hitbox_touch_haz_ev =
-        q_get_event(m_ptr, MOB_EVENT_TOUCHED_HAZARD);
+        q_get_event(m_ptr, MOB_EV_TOUCHED_HAZARD);
         
     sprite* s1_ptr = m_ptr->anim.get_cur_sprite();
     sprite* s2_ptr = m2_ptr->anim.get_cur_sprite();
     
     if(
-        (hitbox_touch_n_ev || hitbox_touch_na_ev || hitbox_touch_eat_ev) &&
+        (hitbox_touch_an_ev || hitbox_touch_na_ev || hitbox_touch_eat_ev) &&
         s1_ptr && s2_ptr &&
         !s1_ptr->hitboxes.empty() && !s2_ptr->hitboxes.empty()
     ) {
     
-        bool reported_n_ev = false;
+        bool reported_an_ev = false;
         bool reported_na_ev = false;
         bool reported_eat_ev = false;
         bool reported_haz_ev = false;
@@ -1229,27 +1291,27 @@ void gameplay::process_mob_touches(
                 
                 //Collision confirmed!
                 if(
-                    hitbox_touch_n_ev &&
-                    !reported_n_ev &&
+                    hitbox_touch_an_ev &&
+                    !reported_an_ev &&
                     h2_ptr->type == HITBOX_TYPE_NORMAL
                 ) {
                     hitbox_interaction ev_info =
                         hitbox_interaction(
                             m2_ptr, h1_ptr, h2_ptr
                         );
-                    hitbox_touch_n_ev->run(
+                    hitbox_touch_an_ev->run(
                         m_ptr, (void*) &ev_info
                     );
-                    reported_n_ev = true;
+                    reported_an_ev = true;
                     
                     //Re-fetch the other events, since this event
                     //could have triggered a state change.
                     hitbox_touch_eat_ev =
-                        q_get_event(m_ptr, MOB_EVENT_HITBOX_TOUCH_EAT);
+                        q_get_event(m_ptr, MOB_EV_HITBOX_TOUCH_EAT);
                     hitbox_touch_haz_ev =
-                        q_get_event(m_ptr, MOB_EVENT_TOUCHED_HAZARD);
+                        q_get_event(m_ptr, MOB_EV_TOUCHED_HAZARD);
                     hitbox_touch_na_ev =
-                        q_get_event(m_ptr, MOB_EVENT_HITBOX_TOUCH_N_A);
+                        q_get_event(m_ptr, MOB_EV_HITBOX_TOUCH_N_A);
                 }
                 
                 if(
@@ -1307,9 +1369,9 @@ void gameplay::process_mob_touches(
                     //Re-fetch the other events, since this event
                     //could have triggered a state change.
                     hitbox_touch_haz_ev =
-                        q_get_event(m_ptr, MOB_EVENT_TOUCHED_HAZARD);
+                        q_get_event(m_ptr, MOB_EV_TOUCHED_HAZARD);
                     hitbox_touch_na_ev =
-                        q_get_event(m_ptr, MOB_EVENT_HITBOX_TOUCH_N_A);
+                        q_get_event(m_ptr, MOB_EV_HITBOX_TOUCH_N_A);
                 }
                 
                 //"Touched hazard" event.
@@ -1339,7 +1401,7 @@ void gameplay::process_mob_touches(
                     //Re-fetch the other events, since this event
                     //could have triggered a state change.
                     hitbox_touch_na_ev =
-                        q_get_event(m_ptr, MOB_EVENT_HITBOX_TOUCH_N_A);
+                        q_get_event(m_ptr, MOB_EV_HITBOX_TOUCH_N_A);
                 }
                 
                 //"Normal hitbox touched attack hitbox" event.

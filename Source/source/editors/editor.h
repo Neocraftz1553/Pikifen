@@ -15,31 +15,36 @@
 #include <vector>
 
 #include "../game_state.h"
-#include "../LAFI/frame.h"
-#include "../LAFI/gui.h"
-#include "../LAFI/label.h"
-#include "../misc_structs.h"
 
-using namespace std;
+
+using std::map;
+using std::string;
+using std::vector;
 
 /*
  * A generic class for an editor.
- * It comes with some common stuff, like a "you have unsaved changes!"
- * warning manager, information for the gui, etc.
+ * It comes with some common stuff, mostly GUI stuff.
  */
 class editor : public game_state {
-private:
-    vector<pair<string, string> > picker_elements;
-    size_t cur_picker_id;
+public:
+
+    editor();
+    virtual ~editor() = default;
+    
+    virtual void do_drawing() = 0;
+    virtual void do_logic() = 0;
+    virtual void handle_allegro_event(ALLEGRO_EVENT &ev);
+    virtual void load();
+    virtual void unload();
+    virtual void update_transformations();
+    virtual string get_name() const = 0;
     
 protected:
 
     static const int   EDITOR_ICON_BMP_PADDING;
     static const int   EDITOR_ICON_BMP_SIZE;
-    static const float KEYBOARD_CAM_ZOOM;
     static const float DOUBLE_CLICK_TIMEOUT;
-    static const float STATUS_OVERRIDE_IMPORTANT_DURATION;
-    static const float STATUS_OVERRIDE_UNIMPORTANT_DURATION;
+    static const float KEYBOARD_CAM_ZOOM;
     static const float UNSAVED_CHANGES_WARNING_DURATION;
     static const int   UNSAVED_CHANGES_WARNING_HEIGHT;
     static const int   UNSAVED_CHANGES_WARNING_SPIKE_SIZE;
@@ -52,7 +57,7 @@ protected:
         ICON_HITBOXES,
         ICON_REFERENCE,
         ICON_INFO,
-        ICON_HELP,
+        ICON_RESIZE,
         ICON_PLAY_PAUSE,
         ICON_NEXT,
         ICON_PREVIOUS,
@@ -78,7 +83,7 @@ protected:
         ICON_TOOLS,
         ICON_OPTIONS,
         ICON_UNDO,
-        ICON_ORIGIN,
+        ICON_GRID,
         ICON_MOB_RADIUS,
         ICON_PIKMIN_SILHOUETTE,
         ICON_ANIMATIONS,
@@ -89,153 +94,225 @@ protected:
         ICON_SNAP_VERTEXES,
         ICON_SNAP_EDGES,
         ICON_SNAP_NOTHING,
+        ICON_SEARCH,
         
         N_EDITOR_ICONS
     };
     
-    struct transformation_controller {
-    private:
-        static const float HANDLE_RADIUS;
-        static const float ROTATION_HANDLE_THICKNESS;
-        signed char moving_handle;
-        point center;
-        point size;
-        float angle;
-        ALLEGRO_TRANSFORM align_transform;
-        ALLEGRO_TRANSFORM disalign_transform;
-        float radius;
-        point pre_move_size;
-        float pre_rotation_angle;
-        float pre_rotation_mouse_angle;
-        point get_handle_pos(const unsigned char handle);
-        void update();
-        
-    public:
-        bool keep_aspect_ratio;
-        bool allow_rotation;
-        
-        void draw_handles();
-        bool handle_mouse_down(const point pos);
-        void handle_mouse_up();
-        bool handle_mouse_move(const point pos);
-        point get_center();
-        point get_size();
-        float get_angle();
-        void set_center(const point &center);
-        void set_size(const point &size);
-        void set_angle(const float angle);
-        transformation_controller();
-    };
     
     /*
-     * Makes setting variables from LAFI widgets easier.
+     * A widget that's drawn on-screen, and with handles that the user
+     * can drag in order to translate, scale, or rotate something.
+     * The transformation properties are not tied to anything, and are
+     * meant to be fed into the widget's functions so it can edit them.
      */
-    struct gui_to_var_helper {
-    private:
-        map<bool*, bool> bools;
-        map<int*, int> ints;
-        map<float*, float> floats;
-        map<unsigned char*, unsigned char> uchars;
-        map<string*, string> strings;
-        map<ALLEGRO_COLOR*, ALLEGRO_COLOR> colors;
-        map<point*, point> points;
+    struct transformation_widget {
     public:
-        void register_bool(bool* var, const bool gui_value);
-        void register_int(int* var, const int gui_value);
-        void register_float(float* var, const float gui_value);
-        void register_uchar(
-            unsigned char* var, const unsigned char gui_value
+        void draw(
+            const point* const center, const point* const size,
+            const float* const angle, const float zoom = 1.0f
+        ) const;
+        bool handle_mouse_down(
+            const point &mouse_coords, const point* const center,
+            const point* const size, const float* const angle,
+            const float zoom = 1.0f
         );
-        void register_string(
-            string* var, const string &gui_value
+        bool handle_mouse_move(
+            const point &mouse_coords, point* center, point* size, float* angle,
+            const float zoom = 1.0f,
+            const bool keep_aspect_ratio = false,
+            const float min_size = -FLT_MAX
         );
-        void register_color(
-            ALLEGRO_COLOR* var, const ALLEGRO_COLOR &gui_value
-        );
-        void register_point(
-            point* var, const point &gui_value
-        );
-        bool all_equal();
-        void set_all();
+        bool handle_mouse_up();
+        bool is_moving_handle();
+        
+        transformation_widget();
+    private:
+        static const float DEF_SIZE;
+        static const float HANDLE_RADIUS;
+        static const float OUTLINE_THICKNESS;
+        static const float ROTATION_HANDLE_THICKNESS;
+        
+        //What handle is being moved. -1 for none. 9 for the rotation handle.
+        signed char moving_handle;
+        //Old size, before the user started dragging handles.
+        point old_size;
+        //Old angle, before the user started dragging handles.
+        float old_angle;
+        //Before rotation began, the mouse made this angle with the center.
+        float old_mouse_angle;
+        
+        void get_locations(
+            const point* const center, const point* const size,
+            const float* const angle, point* points, float* radius,
+            ALLEGRO_TRANSFORM* transform
+        ) const;
     };
     
-    ALLEGRO_BITMAP*         bmp_editor_icons;
-    //If the next click is within this time, it's a double-click.
-    point                   canvas_tl;
-    point                   canvas_br;
-    float                   double_click_time;
-    vector<ALLEGRO_BITMAP*> editor_icons;
-    lafi::frame*            frm_picker;
-    lafi::frame*            frm_toolbar;
-    lafi::gui*              gui;
-    bool                    holding_m1;
-    bool                    holding_m2;
-    bool                    holding_m3;
-    //Is Ctrl pressed down?
-    bool                    is_ctrl_pressed;
-    //Is the GUI currently what's in focus, i.e. the last thing clicked?
-    bool                    is_gui_focused;
-    //Is Shift pressed down?
-    bool                    is_shift_pressed;
-    //Number of the mouse button pressed.
-    size_t                  last_mouse_click;
-    lafi::label*            lbl_status_bar;
-    //Has the user picked any content to load yet?
-    bool                    loaded_content_yet;
-    bool                    made_new_changes;
-    //Is this a mouse drag, or just a shaky click?
-    bool                    mouse_drag_confirmed;
-    //Starting coordinates of a raw mouse drag.
-    point                   mouse_drag_start;
-    //Current state.
-    size_t                  state;
-    //Current sub-state.
-    size_t                  sub_state;
-    //Status bar override text.
-    string                  status_override_text;
-    //Time left to show the status bar override text for.
-    timer                   status_override_timer;
-    point                   unsaved_changes_warning_pos;
-    timer                   unsaved_changes_warning_timer;
-    float                   zoom_max_level;
-    float                   zoom_min_level;
+    class dialog_info {
+    public:
+        //Callback for when it's time to process the dialog's contents.
+        std::function<void()> process_callback;
+        //Callback for when the user closes the dialog, if any.
+        std::function<void()> close_callback;
+        //Title to display on the dialog.
+        string title;
+        //Is it open?
+        bool is_open;
+        
+        dialog_info();
+        void process();
+    };
     
-    bool check_new_unsaved_changes(lafi::widget* caller_widget);
+    struct picker_item {
+        //Its name.
+        string name;
+        //What category it belongs to, or empty string for none.
+        string category;
+        //Bitmap, if any.
+        ALLEGRO_BITMAP* bitmap;
+        
+        picker_item(
+            const string &name,
+            const string &category = "", ALLEGRO_BITMAP* bitmap = nullptr
+        );
+    };
+    
+    class picker_info : public dialog_info {
+    private:
+        //Pointer to the editor that's using it.
+        editor* editor_ptr;
+    public:
+        //List of picker dialog items to choose from.
+        vector<picker_item> items;
+        //Callback for when the user picks an item from the picker dialog.
+        std::function<void(
+            const string &, const string &, const bool
+        )> pick_callback;
+        //Text to display above the picker dialog list.
+        string list_header;
+        //Can the user make a new item in the picker dialog?
+        bool can_make_new;
+        //Only show picker dialog items matching this filter.
+        string filter;
+        
+        picker_info(editor* editor_ptr);
+        void process();
+    };
+    
+    
+    //Bitmap with all of the editor icons.
+    ALLEGRO_BITMAP* bmp_editor_icons;
+    //Top-left corner of the canvas.
+    point canvas_tl;
+    //Bottom right corner of the canvas.
+    point canvas_br;
+    //X coordinate of the canvas GUI separator. -1 = undefined.
+    int canvas_separator_x;
+    //Currently open dialogs, if any.
+    vector<dialog_info*> dialogs;
+    //If the next click is within this time, it's a double-click.
+    float double_click_time;
+    //List of every individual editor icon.
+    vector<ALLEGRO_BITMAP*> editor_icons;
+    //Is the Ctrl key currently pressed down?
+    bool is_ctrl_pressed;
+    //Is the GUI currently in focus? False if it's the canvas.
+    bool is_gui_focused;
+    //Is the mouse currently hovering the gui? False if it's the canvas.
+    bool is_mouse_in_gui;
+    //Is the left mouse button currently pressed down?
+    bool is_m1_pressed;
+    //Is the right mouse button currently pressed down?
+    bool is_m2_pressed;
+    //Is the middle mouse button currently pressed down?
+    bool is_m3_pressed;
+    //Is the Shift key currently pressed down?
+    bool is_shift_pressed;
+    //Number of the mouse button pressed.
+    size_t last_mouse_click;
+    //Has the user picked any content to load yet?
+    bool loaded_content_yet;
+    //Has the user made any unsaved changes yet?
+    bool made_new_changes;
+    //Is this a real mouse drag, or just a shaky click?
+    bool mouse_drag_confirmed;
+    //Starting coordinates of a raw mouse drag.
+    point mouse_drag_start;
+    //Current state.
+    size_t state;
+    //Status bar text.
+    string status_text;
+    //Current sub-state.
+    size_t sub_state;
+    //When placing the unsaved changes warning, focus on these coordinates.
+    point unsaved_changes_warning_pos;
+    //Time left for the unsaved changes warning to be on-screen.
+    timer unsaved_changes_warning_timer;
+    //Maximum zoom level allowed.
+    float zoom_max_level;
+    //Minimum zoom level allowed.
+    float zoom_min_level;
+    
+    
+    //Standard functions.
     void center_camera(
         const point &min_coords, const point &max_coords
     );
-    void close_changes_warning();
-    void create_changes_warning_frame();
-    void create_picker_frame();
-    void create_status_bar();
-    void create_toolbar_frame();
-    void do_logic_pre();
+    bool check_new_unsaved_changes(const point &pos = point());
+    void close_top_dialog();
     void do_logic_post();
+    void do_logic_pre();
+    void draw_grid(
+        const float interval,
+        const ALLEGRO_COLOR &major_color, const ALLEGRO_COLOR &minor_color
+    );
     void draw_unsaved_changes_warning();
-    void emit_status_bar_message(const string &text, const bool important);
-    void generate_and_open_picker(
-        const size_t id, const vector<pair<string, string> > &elements,
-        const string &title, const bool can_make_new
+    void focus_next_special_input();
+    point get_last_widget_pos();
+    bool key_check(
+        const int pressed_key, const int match_key,
+        const bool needs_ctrl = false, const bool needs_shift = false
     );
-    bool is_mouse_in_gui(const point &mouse_coords);
+    bool input_popup(
+        const char* label, const char* prompt, string* text
+    );
+    bool list_popup(
+        const char* label, const vector<string> &items, string* picked_item
+    );
     void leave();
-    void populate_picker(const string &filter);
-    void update_canvas_coordinates();
-    void update_status_bar(
-        const bool omit_coordinates = false,
-        const bool reverse_y_coordinate = false
+    void next_input_needs_special_focus();
+    void open_dialog(
+        const string &title,
+        const std::function<void()> &process_callback
     );
-    void zoom(const float new_zoom, const bool anchor_cursor = true);
+    void open_picker(
+        const string &title,
+        const vector<picker_item> &items,
+        const std::function<void(
+            const string &, const string &, const bool
+        )> &pick_callback,
+        const string &list_header = "",
+        const bool can_make_new = false,
+        const string &filter = ""
+    );
+    void process_dialogs();
+    void process_mob_type_widgets(
+        mob_category** cat, mob_type** typ,
+        const bool only_show_area_editor_types,
+        const std::function<void()> &category_change_callback = nullptr,
+        const std::function<void()> &type_change_callback = nullptr
+    );
+    bool process_size_widgets(
+        const char* label, point &size, const float v_speed,
+        const bool keep_aspect_ratio, const float min_size,
+        const std::function<void()> &pre_change_callback = nullptr
+    );
+    void panel_title(const char* title, const float width);
+    bool saveable_tree_node(const string &category, const string &label);
+    void set_tooltip(const string &explanation, const string &shortcut = "");
+    void zoom_with_cursor(const float new_zoom);
     
-    virtual void custom_picker_cancel_action();
-    virtual void hide_all_frames() = 0;
-    virtual void change_to_right_frame() = 0;
-    virtual void create_new_from_picker(
-        const size_t picker_id, const string &name
-    ) = 0;
-    virtual void pick(
-        const size_t picker_id, const string &name, const string &category
-    ) = 0;
     
     //Input handler functions.
     virtual void handle_key_char_anywhere(const ALLEGRO_EVENT &ev);
@@ -259,55 +336,11 @@ protected:
     virtual void handle_rmb_drag(const ALLEGRO_EVENT &ev);
     virtual void handle_rmb_up(const ALLEGRO_EVENT &ev);
     
-    //LAFI helper functions.
-    float get_angle_picker_angle(
-        lafi::widget* parent, const string &picker_name
-    );
-    string get_button_text(
-        lafi::widget* parent, const string &button_name
-    );
-    bool get_checkbox_check(
-        lafi::widget* parent, const string &checkbox_name
-    );
-    string get_label_text(
-        lafi::widget* parent, const string &label_name
-    );
-    string get_textbox_text(
-        lafi::widget* parent, const string &textbox_name
-    );
-    bool get_radio_selection(
-        lafi::widget* parent, const string &radio_name
-    );
-    void set_angle_picker_angle(
-        lafi::widget* parent, const string &picker_name, const float angle
-    );
-    void set_button_text(
-        lafi::widget* parent, const string &button_name, const string &text
-    );
-    void set_checkbox_check(
-        lafi::widget* parent, const string &checkbox_name, const bool check
-    );
-    void set_label_text(
-        lafi::widget* parent, const string &label_name, const string &text
-    );
-    void set_textbox_text(
-        lafi::widget* parent, const string &textbox_name, const string &text
-    );
-    void set_radio_selection(
-        lafi::widget* parent, const string &radio_name, const bool selection
-    );
-    
-public:
+private:
 
-    editor();
-    virtual ~editor();
-    
-    virtual void do_drawing() = 0;
-    virtual void do_logic() = 0;
-    virtual void handle_controls(const ALLEGRO_EVENT &ev);
-    virtual void load();
-    virtual void unload();
-    virtual void update_transformations();
+    //Controls text input widget focus, when focusing on one is necessary.
+    unsigned char special_input_focus_controller;
 };
+
 
 #endif //ifndef EDITOR_INCLUDED

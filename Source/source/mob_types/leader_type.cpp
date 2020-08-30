@@ -12,11 +12,12 @@
 
 #include "../const.h"
 #include "../functions.h"
+#include "../game.h"
 #include "../load.h"
 #include "../mob_fsms/gen_mob_fsm.h"
 #include "../mob_fsms/leader_fsm.h"
 #include "../utils/string_utils.h"
-#include "../vars.h"
+
 
 /* ----------------------------------------------------------------------------
  * Creates a type of leader.
@@ -24,9 +25,6 @@
 leader_type::leader_type() :
     mob_type(MOB_CATEGORY_LEADERS),
     whistle_range(DEF_WHISTLE_RANGE),
-    punch_strength(DEF_PUNCH_STRENGTH),
-    pluck_delay(0.6),
-    throw_strength_mult(1.0),
     max_throw_height(0),
     bmp_icon(nullptr) {
     
@@ -47,67 +45,64 @@ leader_type::leader_type() :
 
 
 /* ----------------------------------------------------------------------------
- * Loads parameters from a data file.
+ * Returns the vector of animation conversions.
  */
-void leader_type::load_parameters(data_node* file) {
-    pluck_delay =
-        s2f(file->get_child_by_name("pluck_delay")->value);
-    whistle_range =
-        s2f(
-            file->get_child_by_name("whistle_range")->get_value_or_default(
-                f2s(DEF_WHISTLE_RANGE)
-            )
-        );
-    punch_strength =
-        s2i(file->get_child_by_name("punch_strength")->value); //TODO default.
-    throw_strength_mult =
-        s2f(
-            file->get_child_by_name(
-                "throw_strength_mult"
-            )->get_value_or_default("1")
-        );
-        
-    max_throw_height =
-        get_max_throw_height(get_throw_z_speed(throw_strength_mult));
-        
+anim_conversion_vector leader_type::get_anim_conversions() const {
+    anim_conversion_vector v;
+    v.push_back(std::make_pair(LEADER_ANIM_IDLING,       "idling"));
+    v.push_back(std::make_pair(LEADER_ANIM_WALKING,      "walking"));
+    v.push_back(std::make_pair(LEADER_ANIM_PLUCKING,     "plucking"));
+    v.push_back(std::make_pair(LEADER_ANIM_GETTING_UP,   "getting_up"));
+    v.push_back(std::make_pair(LEADER_ANIM_DISMISSING,   "dismissing"));
+    v.push_back(std::make_pair(LEADER_ANIM_THROWING,     "throwing"));
+    v.push_back(std::make_pair(LEADER_ANIM_WHISTLING,    "whistling"));
+    v.push_back(std::make_pair(LEADER_ANIM_PUNCHING,     "punching"));
+    v.push_back(std::make_pair(LEADER_ANIM_LYING,        "lying"));
+    v.push_back(std::make_pair(LEADER_ANIM_PAIN,         "pain"));
+    v.push_back(std::make_pair(LEADER_ANIM_KNOCKED_DOWN, "knocked_down"));
+    v.push_back(std::make_pair(LEADER_ANIM_SPRAYING,     "spraying"));
+    v.push_back(std::make_pair(LEADER_ANIM_DRINKING,     "drinking"));
+    return v;
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Loads properties from a data file.
+ * file:
+ *   File to read from.
+ */
+void leader_type::load_properties(data_node* file) {
+    reader_setter rs(file);
+    
+    rs.set("max_throw_height", max_throw_height);
+    rs.set("whistle_range", whistle_range);
 }
 
 
 /* ----------------------------------------------------------------------------
  * Loads resources into memory.
+ * file:
+ *   File to read from.
  */
 void leader_type::load_resources(data_node* file) {
-    //TODO don't use load_sample for these.
-    sfx_dismiss =
-        load_sample(file->get_child_by_name("dismiss_sfx")->value, mixer);
-    sfx_name_call =
-        load_sample(file->get_child_by_name("name_call_sfx")->value, mixer);
-    sfx_whistle =
-        load_sample(file->get_child_by_name("whistle_sfx")->value, mixer);
-    bmp_icon =
-        bitmaps.get(file->get_child_by_name("icon")->value, file);
-}
-
-
-/* ----------------------------------------------------------------------------
- * Returns the vector of animation conversions.
- */
-anim_conversion_vector leader_type::get_anim_conversions() {
-    anim_conversion_vector v;
-    v.push_back(make_pair(LEADER_ANIM_IDLING,       "idling"));
-    v.push_back(make_pair(LEADER_ANIM_WALKING,      "walking"));
-    v.push_back(make_pair(LEADER_ANIM_PLUCKING,     "plucking"));
-    v.push_back(make_pair(LEADER_ANIM_GETTING_UP,   "getting_up"));
-    v.push_back(make_pair(LEADER_ANIM_DISMISSING,   "dismissing"));
-    v.push_back(make_pair(LEADER_ANIM_THROWING,     "throwing"));
-    v.push_back(make_pair(LEADER_ANIM_WHISTLING,    "whistling"));
-    v.push_back(make_pair(LEADER_ANIM_PUNCHING,     "punching"));
-    v.push_back(make_pair(LEADER_ANIM_LYING,        "lying"));
-    v.push_back(make_pair(LEADER_ANIM_PAIN,         "pain"));
-    v.push_back(make_pair(LEADER_ANIM_KNOCKED_DOWN, "knocked_down"));
-    v.push_back(make_pair(LEADER_ANIM_SPRAYING,     "spraying"));
-    v.push_back(make_pair(LEADER_ANIM_DRINKING,     "drinking"));
-    return v;
+    reader_setter rs(file);
+    
+    string dismiss_sfx_str;
+    string icon_str;
+    string name_call_sfx_str;
+    string whistle_sfx_str;
+    data_node* icon_node = NULL;
+    
+    rs.set("dismiss_sfx", dismiss_sfx_str);
+    rs.set("icon", icon_str, &icon_node);
+    rs.set("name_call_sfx", name_call_sfx_str);
+    rs.set("whistle_sfx", whistle_sfx_str);
+    
+    //TODO Replace load_sample with something better when it exists.
+    bmp_icon = game.bitmaps.get(icon_str, icon_node);
+    sfx_dismiss = load_sample(dismiss_sfx_str);
+    sfx_name_call = load_sample(name_call_sfx_str);
+    sfx_whistle = load_sample(whistle_sfx_str);
 }
 
 
@@ -115,7 +110,7 @@ anim_conversion_vector leader_type::get_anim_conversions() {
  * Unloads resources from memory.
  */
 void leader_type::unload_resources() {
-    bitmaps.detach(bmp_icon);
+    game.bitmaps.detach(bmp_icon);
     //TODO these samples are only being destroyed here because
     //they're being created in load_resource() with load_samples.
     //When the loading changes, update this unload accordingly.
@@ -123,6 +118,3 @@ void leader_type::unload_resources() {
     sfx_name_call.destroy();
     sfx_whistle.destroy();
 }
-
-
-leader_type::~leader_type() { }

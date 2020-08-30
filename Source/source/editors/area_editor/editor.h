@@ -15,13 +15,37 @@
 
 #include "../editor.h"
 
-#include "../../LAFI/frame.h"
-#include "../../LAFI/label.h"
+#include "../../imgui/imgui_impl_allegro5.h"
 
-using namespace std;
+
+using std::deque;
+using std::size_t;
+using std::string;
+
 
 class area_editor : public editor {
+public:
+    //Load this area when the area editor loads.
+    string auto_load_area;
+    //Area being edited when using the quick-play button.
+    string quick_play_area;
+    //Position the camera was it in the editor before quick-play.
+    point quick_play_cam_pos;
+    //Editor camera zoom before quick-play.
+    float quick_play_cam_z;
+    
+    //Standard functions.
+    void do_logic();
+    void do_drawing();
+    void draw_canvas();
+    void load();
+    void unload();
+    virtual string get_name() const;
+    
+    area_editor();
+    
 private:
+
     struct texture_suggestion {
         ALLEGRO_BITMAP* bmp;
         string name;
@@ -64,41 +88,13 @@ private:
     };
     
     
-    enum EDITOR_STATES {
-        EDITOR_STATE_INFO,
-        EDITOR_STATE_MAIN,
-        EDITOR_STATE_LAYOUT,
-        EDITOR_STATE_ASB,
-        EDITOR_STATE_TEXTURE,
-        EDITOR_STATE_ASA,
-        EDITOR_STATE_MOBS,
-        EDITOR_STATE_PATHS,
-        EDITOR_STATE_DETAILS,
-        EDITOR_STATE_REVIEW,
-        EDITOR_STATE_TOOLS,
-        EDITOR_STATE_STT,
-        EDITOR_STATE_OPTIONS,
-    };
-    
-    enum EDITOR_SUB_STATES {
-        EDITOR_SUB_STATE_NONE,
-        EDITOR_SUB_STATE_DRAWING,
-        EDITOR_SUB_STATE_CIRCLE_SECTOR,
-        EDITOR_SUB_STATE_NEW_MOB,
-        EDITOR_SUB_STATE_DUPLICATE_MOB,
-        EDITOR_SUB_STATE_ADD_MOB_LINK,
-        EDITOR_SUB_STATE_DEL_MOB_LINK,
-        EDITOR_SUB_STATE_PATH_DRAWING,
-        EDITOR_SUB_STATE_NEW_SHADOW,
-        EDITOR_SUB_STATE_TEXTURE_VIEW,
-    };
-    
-    enum AREA_EDITOR_PICKER_TYPES {
-        PICKER_LOAD_AREA,
-        PICKER_SET_WEATHER,
-        PICKER_SET_SECTOR_TYPE,
-        PICKER_ADD_SECTOR_HAZARD,
-        PICKER_SET_MOB_TYPE,
+    enum DRAWING_LINE_ERRORS {
+        DRAWING_LINE_NO_ERROR,
+        DRAWING_LINE_LOOPS_IN_SPLIT,
+        DRAWING_LINE_HIT_EDGE_OR_VERTEX,
+        DRAWING_LINE_ALONG_EDGE,
+        DRAWING_LINE_CROSSES_EDGES,
+        DRAWING_LINE_CROSSES_DRAWING,
     };
     
     enum EDITOR_PROBLEM_TYPES {
@@ -118,14 +114,38 @@ private:
         EPT_PATH_STOP_OOB,        //A path stop is out of bounds.
         EPT_PATH_STOPS_TOGETHER,  //Two path stops are in the same place.
         EPT_PATHS_UNCONNECTED,    //The path graph is unconnected.
-        EPT_INVALID_SHADOW,       //Invalid tree shadow image.
+        EPT_UNKNOWN_SHADOW,       //Unknown tree shadow image.
     };
     
-    enum DRAWING_LINE_ERRORS {
-        DRAWING_LINE_NO_ERROR,
-        DRAWING_LINE_WAYWARD_SECTOR,
-        DRAWING_LINE_CROSSES_EDGES,
-        DRAWING_LINE_CROSSES_DRAWING,
+    enum EDITOR_STATES {
+        EDITOR_STATE_INFO,
+        EDITOR_STATE_MAIN,
+        EDITOR_STATE_LAYOUT,
+        EDITOR_STATE_MOBS,
+        EDITOR_STATE_PATHS,
+        EDITOR_STATE_DETAILS,
+        EDITOR_STATE_REVIEW,
+        EDITOR_STATE_TOOLS,
+    };
+    
+    enum EDITOR_SUB_STATES {
+        EDITOR_SUB_STATE_NONE,
+        EDITOR_SUB_STATE_DRAWING,
+        EDITOR_SUB_STATE_CIRCLE_SECTOR,
+        EDITOR_SUB_STATE_OCTEE, //On-canvas texture effect editing.
+        EDITOR_SUB_STATE_NEW_MOB,
+        EDITOR_SUB_STATE_DUPLICATE_MOB,
+        EDITOR_SUB_STATE_ADD_MOB_LINK,
+        EDITOR_SUB_STATE_DEL_MOB_LINK,
+        EDITOR_SUB_STATE_PATH_DRAWING,
+        EDITOR_SUB_STATE_NEW_SHADOW,
+        EDITOR_SUB_STATE_TEXTURE_VIEW,
+    };
+    
+    enum OCTEE_MODES {
+        OCTEE_MODE_OFFSET,
+        OCTEE_MODE_SCALE,
+        OCTEE_MODE_ANGLE,
     };
     
     enum SELECTION_FILTERS {
@@ -151,11 +171,13 @@ private:
         N_VIEW_MODES,
     };
     
+    static const float         COMFY_DIST;
     static const float         CROSS_SECTION_POINT_RADIUS;
     static const float         CURSOR_SNAP_DISTANCE;
     static const float         CURSOR_SNAP_UPDATE_INTERVAL;
     static const float         DEBUG_TEXT_SCALE;
     static const unsigned char DEF_REFERENCE_ALPHA;
+    static const float         KEYBOARD_PAN_AMOUNT;
     static const unsigned char MAX_CIRCLE_SECTOR_POINTS;
     static const float         MAX_GRID_INTERVAL;
     static const size_t        MAX_TEXTURE_SUGGESTIONS;
@@ -168,38 +190,23 @@ private:
     static const float         PATH_PREVIEW_TIMER_DUR;
     static const float         PATH_STOP_RADIUS;
     static const float         POINT_LETTER_TEXT_SCALE;
+    static const float         REFERENCE_MIN_SIZE;
+    static const float         QUICK_PREVIEW_DURATION;
     static const unsigned char SELECTION_COLOR[3];
     static const float         SELECTION_EFFECT_SPEED;
+    static const float         SELECTION_TW_PADDING;
     static const float         UNDO_SAVE_LOCK_DURATION;
     static const float         VERTEX_MERGE_RADIUS;
     static const float         ZOOM_MAX_LEVEL_EDITOR;
     static const float         ZOOM_MIN_LEVEL_EDITOR;
     
-    //GUI widgets.
-    lafi::frame* frm_main;
-    lafi::frame* frm_area;
-    lafi::frame* frm_layout;
-    lafi::frame* frm_sector;
-    lafi::frame* frm_sector_multi;
-    lafi::frame* frm_asb;
-    lafi::frame* frm_texture;
-    lafi::frame* frm_asa;
-    lafi::frame* frm_mobs;
-    lafi::frame* frm_mob;
-    lafi::frame* frm_mob_multi;
-    lafi::frame* frm_paths;
-    lafi::frame* frm_details;
-    lafi::frame* frm_shadow;
-    lafi::frame* frm_review;
-    lafi::frame* frm_info;
-    lafi::frame* frm_tools;
-    lafi::frame* frm_stt;
-    lafi::frame* frm_options;
-    lafi::style* faded_style;
-    lafi::style* gui_style;
     
     //Time left until a backup is generated.
     timer backup_timer;
+    //Can the user load the backup?
+    bool can_load_backup;
+    //Can the user use the "reload" button?
+    bool can_reload;
     //Where the cross-section tool points are.
     point cross_section_checkpoints[2];
     //Cross-section window's start coordinates.
@@ -214,6 +221,8 @@ private:
     string cur_area_name;
     //When showing a hazard in the list, this is the index of the current one.
     size_t cur_hazard_nr;
+    //The current transformation widget.
+    transformation_widget cur_transformation_widget;
     //Last known cursor snap position for heavy snap modes.
     point cursor_snap_cache;
     //Time left to update the cursor snap position for heavy snap modes.
@@ -236,8 +245,6 @@ private:
     mob_category* last_mob_category;
     //Mob type of the last mob placed.
     mob_type* last_mob_type;
-    //List of lone edges found.
-    unordered_set<edge*> lone_edges;
     //Closest mob to the mouse when moving.
     mob_gen* move_closest_mob;
     //Closest mob was here when the move started (world coords).
@@ -270,14 +277,24 @@ private:
     vector<bool> new_circle_sector_valid_edges;
     //Time left to keep the error-redness of the new sector's line(s) for.
     timer new_sector_error_tint_timer;
-    //Non-simple sectors found, and their reason for being broken.
-    map<sector*, TRIANGULATION_ERRORS> non_simples;
+    //Mouse drag start coordinates, when using on-canvas texture effect editing.
+    point octee_drag_start;
+    //Texture's original angle, when using on-canvas texture effect editing.
+    float octee_orig_angle;
+    //Texture's original offset, when using on-canvas texture effect editing.
+    point octee_orig_offset;
+    //Texture's original scale, when using on-canvas texture effect editing.
+    point octee_orig_scale;
+    //Current on-canvas texture effect edit mode.
+    OCTEE_MODES octee_mode;
     //When drawing a path, create normal links. False for one-way links.
     bool path_drawing_normals;
     //First stop of the next link when drawing a path.
     path_stop* path_drawing_stop_1;
     //Path stops that make up the current path preview.
     vector<path_stop*> path_preview;
+    //Total distance of the previewed path.
+    float path_preview_dist;
     //Location of the two path preview checkpoints.
     point path_preview_checkpoints[2];
     //Only calculate the preview path when this time is up.
@@ -292,6 +309,8 @@ private:
     map<path_stop*, point> pre_move_stop_coords;
     //Position of the selected vertexes before movement.
     map<vertex*, point> pre_move_vertex_coords;
+    //Description of the current problem found.
+    string problem_description;
     //Information about the problematic intersecting edges, if any.
     edge_intersection problem_edge_intersection;
     //Pointer to the problematic mob, if any.
@@ -304,36 +323,46 @@ private:
     sector* problem_sector_ptr;
     //Pointer to the problematic tree shadow, if any.
     tree_shadow* problem_shadow_ptr;
-    //String with extra information about the current problem, if any.
-    string problem_string;
+    //Title of the current problem found.
+    string problem_title;
     //Pointer to the problematic vertex, if any.
     vertex* problem_vertex_ptr;
+    //Time left in the quick preview mode, including fade out.
+    timer quick_preview_timer;
     //Opacity of the reference image.
     unsigned char reference_alpha;
+    //Reference image center.
+    point reference_center;
+    //Reference image dimensions.
+    point reference_size;
     //Bitmap of the reference image.
     ALLEGRO_BITMAP* reference_bitmap;
     //File name of the reference image.
     string reference_file_name;
-    //Current transformations on the reference image.
-    transformation_controller reference_transformation;
+    //Keep the aspect ratio when resizing the reference?
+    bool reference_keep_aspect_ratio;
     //Currently selected edges.
     set<edge*> selected_edges;
     //Currently selected mobs.
     set<mob_gen*> selected_mobs;
     //Currently selected path links.
-    set<pair<path_stop*, path_stop*> > selected_path_links;
+    set<std::pair<path_stop*, path_stop*> > selected_path_links;
     //Currently selected path stops.
     set<path_stop*> selected_path_stops;
     //Currently selected sectors.
     set<sector*> selected_sectors;
     //Currently selected tree shadow.
     tree_shadow* selected_shadow;
-    //Transformation controller of the selected tree shadow.
-    transformation_controller selected_shadow_transformation;
+    //Keep the aspect ratio of the currently selected shadow?
+    bool selected_shadow_keep_aspect_ratio;
     //Currently selected vertexes.
     set<vertex*> selected_vertexes;
     //Is the user currently performing a rectangle box?
     bool selecting;
+    //Angle of the selection.
+    float selection_angle;
+    //Center of the selection.
+    point selection_center;
     //The selection's alpha depends on this value.
     float selection_effect;
     //Point where the selection is currently at.
@@ -342,6 +371,14 @@ private:
     unsigned char selection_filter;
     //Has the user agreed to homogenize the selection?
     bool selection_homogenized;
+    //Angle of the selection, before it got transformed.
+    float selection_orig_angle;
+    //Center of the selection, before it got transformed.
+    point selection_orig_center;
+    //Size of the selection, before it got transformed.
+    point selection_orig_size;
+    //Size of the selection, padding included.
+    point selection_size;
     //Point where the selection started.
     point selection_start;
     //Show the path stop closest to the cursor?
@@ -358,37 +395,31 @@ private:
     bool show_shadows;
     //Current cursor snapping mode.
     unsigned char snap_mode;
-    //Starting coordinates of a sector texture transformer drag.
-    point stt_drag_start;
-    //Original angle of the sector in the sector texture transformer.
-    float stt_orig_angle;
-    //Original offset of the sector in the sector texture transformer.
-    point stt_orig_offset;
-    //Original scale of the sector in the sector texture transformer.
-    point stt_orig_scale;
-    //Current mode for the sector texture transformer.
-    unsigned char stt_mode;
-    //Sector currently being edited in the sector texture transformer.
-    sector* stt_sector;
     //List of texture suggestions.
     vector<texture_suggestion> texture_suggestions;
     //Undo history, with the state of the area at each point.
-    deque<pair<area_data*, string> > undo_history;
+    std::deque<std::pair<area_data*, string> > undo_history;
     //Name of the undo operation responsible for the lock.
     string undo_save_lock_operation;
     //During this timer, don't save state for operations matching the last one.
     timer undo_save_lock_timer;
     
+    //Position of some important widgets.
+    point load_widget_pos;
+    point reload_widget_pos;
+    point quit_widget_pos;
+    
+    
     //General functions.
     bool are_nodes_traversable(
         const layout_drawing_node &n1,
         const layout_drawing_node &n2
-    );
+    ) const;
     void cancel_circle_sector();
     void cancel_layout_drawing();
     void cancel_layout_moving();
-    void calculate_preview_path();
-    void change_snap_mode(const size_t new_mode);
+    float calculate_preview_path();
+    void change_state(const EDITOR_STATES new_state);
     void check_drawing_line(const point &pos);
     void clear_circle_sector();
     void clear_current_area();
@@ -398,11 +429,22 @@ private:
     void clear_selection();
     void clear_texture_suggestions();
     void clear_undo_history();
+    void close_area_picker();
+    void close_options_dialog();
     void create_area();
+    void create_drawing_vertexes();
     void create_new_from_picker(const size_t picker_id, const string &name);
-    void delete_current_hazard();
-    void delete_selected_mobs();
-    void delete_selected_path_elements();
+    sector* create_sector_for_layout_drawing(sector* copy_from);
+    void delete_edge(edge* e_ptr);
+    bool delete_edges(const set<edge*> &which);
+    void delete_mobs(const set<mob_gen*> &which);
+    void delete_path_links(
+        const set<std::pair<path_stop*, path_stop*> > &which
+    );
+    void delete_path_stops(const set<path_stop*> &which);
+    static void draw_canvas_imgui_callback(
+        const ImDrawList* parent_list, const ImDrawCmd* cmd
+    );
     void draw_cross_section_sector(
         const float start_ratio, const float end_ratio, const float proportion,
         const float lowest_z, sector* sector_ptr
@@ -415,41 +457,51 @@ private:
     void emit_triangulation_error_status_bar_message(
         const TRIANGULATION_ERRORS error
     );
-    unsigned char find_problems();
+    void find_problems();
     void finish_circle_sector();
-    void finish_layout_drawing();
     void finish_layout_moving();
+    void finish_new_sector_drawing();
     void forget_prepared_state(area_data* prepared_change);
-    unordered_set<sector*> get_affected_sectors(set<vertex*> &vertexes);
+    void get_affected_sectors(
+        sector* s_ptr, unordered_set<sector*> &list
+    ) const;
+    void get_affected_sectors(
+        set<sector*> &sectors, unordered_set<sector*> &list
+    ) const;
+    void get_affected_sectors(
+        set<vertex*> &vertexes, unordered_set<sector*> &list
+    ) const;
     void get_clicked_layout_element(
         vertex** clicked_vertex, edge** clicked_edge, sector** clicked_sector
-    );
+    ) const;
     edge* get_closest_edge_to_angle(
         vertex* v_ptr, const float angle, const bool clockwise,
         float* closest_edge_angle
-    );
+    ) const;
     bool get_common_sector(
         vector<vertex*> &vertexes, vector<edge*> &edges, sector** result
-    );
+    ) const;
     edge* get_correct_post_split_edge(
         vertex* v_ptr, edge* e1_ptr, edge* e2_ptr
-    );
-    bool get_drawing_outer_sector(sector** result);
-    edge* get_edge_under_point(const point &p, edge* after = NULL);
-    vector<edge_intersection> get_intersecting_edges();
-    float get_mob_gen_radius(mob_gen* m);
+    ) const;
+    bool get_drawing_outer_sector(sector** result) const;
+    edge* get_edge_under_point(const point &p, edge* after = NULL) const;
+    vector<edge_intersection> get_intersecting_edges() const;
+    float get_mob_gen_radius(mob_gen* m) const;
     bool get_mob_link_under_point(
         const point &p,
-        pair<mob_gen*, mob_gen*>* data1, pair<mob_gen*, mob_gen*>* data2
-    );
-    mob_gen* get_mob_under_point(const point &p);
+        std::pair<mob_gen*, mob_gen*>* data1,
+        std::pair<mob_gen*, mob_gen*>* data2
+    ) const;
+    mob_gen* get_mob_under_point(const point &p) const;
     bool get_path_link_under_point(
         const point &p,
-        pair<path_stop*, path_stop*>* data1, pair<path_stop*, path_stop*>* data2
-    );
-    path_stop* get_path_stop_under_point(const point &p);
-    sector* get_sector_under_point(const point &p);
-    vertex* get_vertex_under_point(const point &p);
+        std::pair<path_stop*, path_stop*>* data1,
+        std::pair<path_stop*, path_stop*>* data2
+    ) const;
+    path_stop* get_path_stop_under_point(const point &p) const;
+    sector* get_sector_under_point(const point &p) const;
+    vertex* get_vertex_under_point(const point &p) const;
     void goto_problem();
     void handle_line_error();
     void homogenize_selected_mobs();
@@ -457,34 +509,80 @@ private:
     void load_area(const bool from_backup);
     void load_backup();
     void load_reference();
+    bool merge_sectors(sector* s1, sector* s2);
     void merge_vertex(
         vertex* v1, vertex* v2, unordered_set<sector*>* affected_sectors
     );
-    void open_picker(const unsigned char type);
+    void open_area_picker();
+    void open_options_dialog();
     void populate_texture_suggestions();
-    void pick(
-        const size_t picker_id, const string &name, const string &category
+    void pick_area(
+        const string &name, const string &category, const bool is_new
+    );
+    void pick_texture(
+        const string &name, const string &category, const bool is_new
     );
     area_data* prepare_state();
+    void press_circle_sector_button();
+    void press_duplicate_mobs_button();
+    void press_load_button();
+    void press_new_mob_button();
+    void press_new_path_button();
+    void press_new_sector_button();
+    void press_new_tree_shadow_button();
+    void press_reference_button();
+    void press_reload_button();
+    void press_remove_edge_button();
+    void press_remove_mob_button();
+    void press_remove_path_button();
+    void press_remove_tree_shadow_button();
+    void press_quick_play_button();
+    void press_quit_button();
+    void press_save_button();
+    void press_selection_filter_button();
+    void press_snap_mode_button();
+    void press_undo_button();
+    void process_gui();
+    void process_gui_control_panel();
+    void process_gui_menu_bar();
+    void process_gui_mob_script_vars(mob_gen* gen);
+    void process_gui_panel_details();
+    void process_gui_panel_info();
+    void process_gui_panel_layout();
+    void process_gui_panel_main();
+    void process_gui_panel_mob();
+    void process_gui_panel_mobs();
+    void process_gui_panel_options();
+    void process_gui_panel_paths();
+    void process_gui_panel_review();
+    void process_gui_panel_sector();
+    void process_gui_panel_tools();
+    void process_gui_options_dialog();
+    void process_gui_status_bar();
+    void process_gui_toolbar();
     void register_change(
         const string &operation_name, area_data* pre_prepared_change = NULL
     );
-    bool remove_isolated_sectors();
+    bool remove_isolated_sector(sector* s_ptr);
     void resize_everything(const float mult);
+    void rollback_to_prepared_state(area_data* prepared_state);
+    void rotate_mob_gens_to_point(const point &pos);
     bool save_area(const bool to_backup);
     void save_backup();
     void save_reference();
     void select_different_hazard(const bool next);
-    void select_edge(edge* e);
-    void select_sector(sector* s);
-    void select_tree_shadow(tree_shadow* v);
-    void select_vertex(vertex* v);
+    void select_edge(edge* e_ptr);
+    void select_sector(sector* s_ptr);
+    void select_tree_shadow(tree_shadow* s_ptr);
+    void select_vertex(vertex* v_ptr);
+    void set_selection_status_text();
     void set_new_circle_sector_points();
-    point snap_point(const point &p);
+    point snap_point(const point &p, const bool ignore_selected = false);
+    void split_sector_with_drawing();
     vertex* split_edge(edge* e_ptr, const point &where);
     path_stop* split_path_link(
-        const pair<path_stop*, path_stop*> &l1,
-        const pair<path_stop*, path_stop*> &l2,
+        const std::pair<path_stop*, path_stop*> &l1,
+        const std::pair<path_stop*, path_stop*> &l2,
         const point &where
     );
     void start_mob_move();
@@ -492,13 +590,26 @@ private:
     void start_shadow_move();
     void start_vertex_move();
     void toggle_duplicate_mob_mode();
+    void traverse_sector_for_split(
+        sector* s_ptr, vertex* begin, vertex* checkpoint,
+        vector<edge*>* edges, vector<vertex*>* vertexes,
+        bool* working_sector_left
+    );
     void undo();
     void undo_layout_drawing_node();
+    void update_affected_sectors(
+        const unordered_set<sector*> &affected_sectors
+    );
     bool update_backup_status();
-    void update_reference(const string &new_file_name);
+    void update_inner_sectors_outer_sector(
+        const vector<edge*> &edges_to_check,
+        sector* old_outer, sector* new_outer
+    );
+    void update_reference();
     void update_sector_texture(sector* s_ptr, const string &file_name);
     void update_texture_suggestions(const string &n);
     void update_undo_history();
+    void update_vertex_selection();
     
     //Input handler functions.
     void handle_key_char_anywhere(const ALLEGRO_EVENT &ev);
@@ -518,49 +629,10 @@ private:
     void handle_rmb_down(const ALLEGRO_EVENT &ev);
     void handle_rmb_drag(const ALLEGRO_EVENT &ev);
     void pan_cam(const ALLEGRO_EVENT &ev);
-    void reset_cam_xy(const ALLEGRO_EVENT &ev);
-    void reset_cam_zoom(const ALLEGRO_EVENT &ev);
+    void reset_cam_xy();
+    void reset_cam_zoom();
     
-    //GUI functions.
-    void asa_to_gui();
-    void asb_to_gui();
-    void change_to_right_frame();
-    void clear_current_area_gui();
-    void details_to_gui();
-    void gui_to_asa();
-    void gui_to_asb();
-    void gui_to_details();
-    void gui_to_info();
-    void gui_to_mob();
-    void gui_to_options();
-    void gui_to_sector();
-    void gui_to_stt();
-    void gui_to_tools();
-    void hide_all_frames();
-    void info_to_gui();
-    void mob_to_gui();
-    void options_to_gui();
-    void path_to_gui();
-    void review_to_gui();
-    void sector_to_gui();
-    void tools_to_gui();
-    void stt_to_gui();
-    void update_main_frame();
-    
-    void custom_picker_cancel_action();
-    
-public:
-    void do_logic();
-    void do_drawing();
-    void load();
-    void unload();
-    
-    string auto_load_area;
-    
-    area_editor();
-    ~area_editor();
 };
-
 
 
 #endif //ifndef AREA_EDITOR_INCLUDED

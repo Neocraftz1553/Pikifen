@@ -11,66 +11,69 @@
 #include "converter_fsm.h"
 
 #include "../functions.h"
+#include "../game.h"
 #include "../mobs/converter.h"
 #include "../utils/string_utils.h"
 
 
 /* ----------------------------------------------------------------------------
  * Creates the finite state machine for the converter's logic.
+ * typ:
+ *   Mob type to create the finite state machine for.
  */
 void converter_fsm::create_fsm(mob_type* typ) {
     easy_fsm_creator efc;
     efc.new_state("idling", CONVERTER_STATE_IDLING); {
-        efc.new_event(MOB_EVENT_ON_ENTER); {
+        efc.new_event(MOB_EV_ON_ENTER); {
             efc.run(converter_fsm::become_idle);
         }
-        efc.new_event(MOB_EVENT_PIKMIN_LANDED); {
+        efc.new_event(MOB_EV_THROWN_PIKMIN_LANDED); {
             efc.run(converter_fsm::handle_pikmin);
         }
-        efc.new_event(MOB_EVENT_TOUCHED_OBJECT); {
+        efc.new_event(MOB_EV_TOUCHED_OBJECT); {
             efc.run(converter_fsm::handle_object_touch);
         }
     }
     
     efc.new_state("bumping", CONVERTER_STATE_BUMPING); {
-        efc.new_event(MOB_EVENT_ON_ENTER); {
+        efc.new_event(MOB_EV_ON_ENTER); {
             efc.run(converter_fsm::bumped);
         }
-        efc.new_event(MOB_EVENT_ANIMATION_END); {
+        efc.new_event(MOB_EV_ANIMATION_END); {
             efc.run(converter_fsm::finish_being_bumped);
             efc.change_state("closing");
         }
     }
     
     efc.new_state("closing", CONVERTER_STATE_CLOSING); {
-        efc.new_event(MOB_EVENT_ANIMATION_END); {
+        efc.new_event(MOB_EV_ANIMATION_END); {
             efc.run(converter_fsm::open_or_spit);
         }
     }
     
     efc.new_state("spitting", CONVERTER_STATE_SPITTING); {
-        efc.new_event(MOB_EVENT_ON_ENTER); {
+        efc.new_event(MOB_EV_ON_ENTER); {
             efc.run(converter_fsm::spew);
         }
-        efc.new_event(MOB_EVENT_ANIMATION_END); {
+        efc.new_event(MOB_EV_ANIMATION_END); {
             efc.run(converter_fsm::open_or_die);
         }
     }
     
     efc.new_state("opening", CONVERTER_STATE_OPENING); {
-        efc.new_event(MOB_EVENT_ON_ENTER); {
+        efc.new_event(MOB_EV_ON_ENTER); {
             efc.run(converter_fsm::open);
         }
-        efc.new_event(MOB_EVENT_ANIMATION_END); {
+        efc.new_event(MOB_EV_ANIMATION_END); {
             efc.change_state("idling");
         }
     }
     
     efc.new_state("dying", CONVERTER_STATE_DYING); {
-        efc.new_event(MOB_EVENT_ON_ENTER); {
+        efc.new_event(MOB_EV_ON_ENTER); {
             efc.run(converter_fsm::start_dying);
         }
-        efc.new_event(MOB_EVENT_ANIMATION_END); {
+        efc.new_event(MOB_EV_ANIMATION_END); {
             efc.run(converter_fsm::finish_dying);
         }
     }
@@ -90,6 +93,12 @@ void converter_fsm::create_fsm(mob_type* typ) {
 
 /* ----------------------------------------------------------------------------
  * Enters the idle state.
+ * m:
+ *   The mob.
+ * info1:
+ *   Unused.
+ * info2:
+ *   Unused.
  */
 void converter_fsm::become_idle(mob* m, void* info1, void* info2) {
     converter* c_ptr = (converter*) m;
@@ -106,6 +115,12 @@ void converter_fsm::become_idle(mob* m, void* info1, void* info2) {
 
 /* ----------------------------------------------------------------------------
  * Does a little bumpy animation after a leader touches it.
+ * m:
+ *   The mob.
+ * info1:
+ *   Unused.
+ * info2:
+ *   Unused.
  */
 void converter_fsm::bumped(mob* m, void* info1, void* info2) {
     converter* c_ptr = (converter*) m;
@@ -123,6 +138,12 @@ void converter_fsm::bumped(mob* m, void* info1, void* info2) {
 
 /* ----------------------------------------------------------------------------
  * Makes the converter close after it gets bumped.
+ * m:
+ *   The mob.
+ * info1:
+ *   Unused.
+ * info2:
+ *   Unused.
  */
 void converter_fsm::finish_being_bumped(mob* m, void* info1, void* info2) {
     ((converter*) m)->close();
@@ -131,6 +152,12 @@ void converter_fsm::finish_being_bumped(mob* m, void* info1, void* info2) {
 
 /* ----------------------------------------------------------------------------
  * Makes the converter vanish.
+ * m:
+ *   The mob.
+ * info1:
+ *   Unused.
+ * info2:
+ *   Unused.
  */
 void converter_fsm::finish_dying(mob* m, void* info1, void* info2) {
     m->to_delete = true;
@@ -139,6 +166,12 @@ void converter_fsm::finish_dying(mob* m, void* info1, void* info2) {
 
 /* ----------------------------------------------------------------------------
  * Handles an object bumping against it.
+ * m:
+ *   The mob.
+ * info1:
+ *   Unused.
+ * info2:
+ *   Unused.
  */
 void converter_fsm::handle_object_touch(mob* m, void* info1, void* info2) {
     mob* bumper = (mob*) info1;
@@ -150,6 +183,12 @@ void converter_fsm::handle_object_touch(mob* m, void* info1, void* info2) {
 
 /* ----------------------------------------------------------------------------
  * Code to handle a Pikmin having been thrown inside.
+ * m:
+ *   The mob.
+ * info1:
+ *   Unused.
+ * info2:
+ *   Unused.
  */
 void converter_fsm::handle_pikmin(mob* m, void* info1, void* info2) {
     converter* c_ptr = (converter*) m;
@@ -180,10 +219,10 @@ void converter_fsm::handle_pikmin(mob* m, void* info1, void* info2) {
     }
     
     particle p(
-        PARTICLE_TYPE_BITMAP, m->pos, m->z + m->type->height + 1.0,
+        PARTICLE_TYPE_BITMAP, m->pos, m->z + m->height + 1.0,
         24, 1.5, PARTICLE_PRIORITY_MEDIUM
     );
-    p.bitmap = bmp_smoke;
+    p.bitmap = game.sys_assets.bmp_smoke;
     particle_generator pg(0, p, 15);
     pg.number_deviation = 5;
     pg.angle = 0;
@@ -191,12 +230,18 @@ void converter_fsm::handle_pikmin(mob* m, void* info1, void* info2) {
     pg.total_speed = 70;
     pg.total_speed_deviation = 10;
     pg.duration_deviation = 0.5;
-    pg.emit(particles);
+    pg.emit(game.states.gameplay_st->particles);
 }
 
 
 /* ----------------------------------------------------------------------------
  * Makes the converter open up.
+ * m:
+ *   The mob.
+ * info1:
+ *   Unused.
+ * info2:
+ *   Unused.
  */
 void converter_fsm::open(mob* m, void* info1, void* info2) {
     converter* c_ptr = (converter*) m;
@@ -212,6 +257,12 @@ void converter_fsm::open(mob* m, void* info1, void* info2) {
 /* ----------------------------------------------------------------------------
  * Changes to the opening state or the dying state, depending
  * on whether it can still output Pikmin.
+ * m:
+ *   The mob.
+ * info1:
+ *   Unused.
+ * info2:
+ *   Unused.
  */
 void converter_fsm::open_or_die(mob* m, void* info1, void* info2) {
     converter* c_ptr = (converter*) m;
@@ -227,6 +278,12 @@ void converter_fsm::open_or_die(mob* m, void* info1, void* info2) {
 /* ----------------------------------------------------------------------------
  * Changes to the opening state or the spitting state, depending
  * on whether it has Pikmin in the buffer or not.
+ * m:
+ *   The mob.
+ * info1:
+ *   Unused.
+ * info2:
+ *   Unused.
  */
 void converter_fsm::open_or_spit(mob* m, void* info1, void* info2) {
     converter* c_ptr = (converter*) m;
@@ -241,6 +298,12 @@ void converter_fsm::open_or_spit(mob* m, void* info1, void* info2) {
 
 /* ----------------------------------------------------------------------------
  * Spews out the converted seeds.
+ * m:
+ *   The mob.
+ * info1:
+ *   Unused.
+ * info2:
+ *   Unused.
  */
 void converter_fsm::spew(mob* m, void* info1, void* info2) {
     converter* c_ptr = (converter*) m;
@@ -257,6 +320,12 @@ void converter_fsm::spew(mob* m, void* info1, void* info2) {
 
 /* ----------------------------------------------------------------------------
  * Makes the converter start dying.
+ * m:
+ *   The mob.
+ * info1:
+ *   Unused.
+ * info2:
+ *   Unused.
  */
 void converter_fsm::start_dying(mob* m, void* info1, void* info2) {
     converter* c_ptr = (converter*) m;

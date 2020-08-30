@@ -15,15 +15,6 @@
 #include "mob.h"
 #include "pile.h"
 
-enum RESOURCE_STATES {
-    RESOURCE_STATE_IDLE_WAITING,
-    RESOURCE_STATE_IDLE_MOVING,
-    RESOURCE_STATE_IDLE_STUCK,
-    RESOURCE_STATE_BEING_DELIVERED,
-    
-    N_RESOURCE_STATES,
-};
-
 
 /* ----------------------------------------------------------------------------
  * A resource is any object that a single Pikmin can pick up, and deliver
@@ -32,13 +23,21 @@ enum RESOURCE_STATES {
  */
 class resource : public mob {
 public:
-
+    //What type of resource it is.
     resource_type* res_type;
+    
+    //Pile it belongs to, if any.
     pile* origin_pile;
     
-    resource(const point &pos, resource_type* type, const float angle);
-    void draw_mob(bitmap_effect_manager* effect_manager = NULL);
+    //Disappear.
     void vanish();
+    
+    //Constructor.
+    resource(const point &pos, resource_type* type, const float angle);
+    
+    //Mob drawing routine.
+    virtual void draw_mob();
 };
+
 
 #endif //ifndef RESOURCE_INCLUDED

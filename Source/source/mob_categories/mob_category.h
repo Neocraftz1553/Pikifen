@@ -18,7 +18,11 @@
 
 #include "../utils/geometry_utils.h"
 
-using namespace std;
+
+using std::size_t;
+using std::string;
+using std::vector;
+
 
 enum MOB_CATEGORIES {
     //Sorted by what types of mobs to load first.
@@ -36,12 +40,17 @@ enum MOB_CATEGORIES {
     MOB_CATEGORY_TOOLS,
     MOB_CATEGORY_SHIPS,
     MOB_CATEGORY_BRIDGES,
+    MOB_CATEGORY_GROUP_TASKS,
+    MOB_CATEGORY_SCALES,
+    MOB_CATEGORY_TRACKS,
+    MOB_CATEGORY_BOUNCERS,
     MOB_CATEGORY_DECORATIONS,
     MOB_CATEGORY_INTERACTABLES,
     MOB_CATEGORY_CUSTOM,
     
     N_MOB_CATEGORIES,
 };
+
 
 class mob;
 class mob_type;
@@ -59,8 +68,8 @@ public:
     string folder;
     ALLEGRO_COLOR editor_color;
     
-    virtual void get_type_names(vector<string> &list) = 0;
-    virtual mob_type* get_type(const string &name) = 0;
+    virtual void get_type_names(vector<string> &list) const = 0;
+    virtual mob_type* get_type(const string &name) const = 0;
     virtual mob_type* create_type() = 0;
     virtual void register_type(mob_type* type) = 0;
     virtual mob* create_mob(
@@ -73,7 +82,7 @@ public:
         const size_t id, const string &name, const string &plural_name,
         const string &folder, const ALLEGRO_COLOR editor_color
     );
-    virtual ~mob_category();
+    virtual ~mob_category() = default;
     
 };
 
@@ -85,19 +94,21 @@ public:
  * Read the sector type manager's comments for more info.
  */
 struct mob_category_manager {
+public:
+    void register_category(size_t nr, mob_category* category);
+    mob_type* find_mob_type(const string &name) const;
+    mob_type* find_mob_type_from_folder_name(
+        mob_category* cat, const string &name
+    ) const;
+    mob_category* get(const size_t id) const;
+    mob_category* get_from_folder_name(const string &name) const;
+    mob_category* get_from_name(const string &name) const;
+    mob_category* get_from_pname(const string &pname) const;
+    void clear();
+
 private:
     vector<mob_category*> categories;
     
-public:
-    void register_category(size_t nr, mob_category* category);
-    mob_type* find_mob_type(const string &name);
-    mob_type* find_mob_type_from_folder_name(
-        mob_category* cat, const string &name
-    );
-    mob_category* get(const size_t id);
-    mob_category* get_from_name(const string &name);
-    mob_category* get_from_pname(const string &pname);
-    void clear();
 };
 
 
@@ -107,8 +118,8 @@ public:
  */
 class none_category : public mob_category {
 public:
-    virtual void get_type_names(vector<string> &list);
-    virtual mob_type* get_type(const string &name);
+    virtual void get_type_names(vector<string> &list) const;
+    virtual mob_type* get_type(const string &name) const;
     virtual mob_type* create_type();
     virtual void register_type(mob_type* type);
     virtual mob* create_mob(
@@ -118,7 +129,6 @@ public:
     virtual void clear_types();
     
     none_category();
-    ~none_category();
 };
 
 

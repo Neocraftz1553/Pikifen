@@ -16,6 +16,7 @@
 #include "mob_type.h"
 #include "pikmin_type.h"
 
+
 enum CONVERTER_ANIMATIONS {
     /* Because converters can have multiple animations that do the same thing,
      * due to the different types, there are actually
@@ -31,6 +32,18 @@ enum CONVERTER_ANIMATIONS {
     CONVERTER_ANIM_DYING,
     
     N_CONVERTER_ANIMS,
+};
+
+
+enum CONVERTER_STATES {
+    CONVERTER_STATE_IDLING,
+    CONVERTER_STATE_BUMPING,
+    CONVERTER_STATE_CLOSING,
+    CONVERTER_STATE_SPITTING,
+    CONVERTER_STATE_OPENING,
+    CONVERTER_STATE_DYING,
+    
+    N_CONVERTER_STATES,
 };
 
 
@@ -50,9 +63,9 @@ public:
     size_t max_pikmin_spawn_requirement;
     
     converter_type();
-    ~converter_type();
-    void load_parameters(data_node* file);
-    anim_conversion_vector get_anim_conversions();
+    void load_properties(data_node* file);
+    anim_conversion_vector get_anim_conversions() const;
 };
+
 
 #endif //ifndef CONVERTER_TYPE_INCLUDED

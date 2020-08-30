@@ -13,25 +13,39 @@
 #include "mob_utils.h"
 
 #include "../functions.h"
+#include "../game.h"
 #include "../mob_script_action.h"
-#include "../vars.h"
 #include "mob.h"
 
-using namespace std;
+
+using std::size_t;
+
+
+/* ----------------------------------------------------------------------------
+ * Creates a structure with info about a carrying spot.
+ * pos:
+ *   The spot's relative coordinates.
+ */
+carrier_spot_struct::carrier_spot_struct(const point &pos) :
+    state(CARRY_SPOT_FREE),
+    pos(pos),
+    pik_ptr(NULL) {
+    
+}
 
 
 /* ----------------------------------------------------------------------------
  * Creates a structure with info about carrying.
- * m:                 The mob this info belongs to.
- * max_carriers:      The maximum number of carrier Pikmin.
- * carry_destination: Where to deliver the mob. Use CARRY_DESTINATION_*.
+ * m:
+ *   The mob this info belongs to.
+ * destination:
+ *   Where to deliver the mob. Use CARRY_DESTINATION_*.
  */
 carry_info_struct::carry_info_struct(mob* m, const size_t destination) :
     m(m),
     destination(destination),
     cur_carrying_strength(0),
     cur_n_carriers(0),
-    is_stuck(false),
     is_moving(false),
     intended_mob(nullptr),
     must_return(false),
@@ -40,8 +54,8 @@ carry_info_struct::carry_info_struct(mob* m, const size_t destination) :
     for(size_t c = 0; c < m->type->max_carriers; ++c) {
         float angle = TAU / m->type->max_carriers * c;
         point p(
-            cos(angle) * (m->type->radius + standard_pikmin_radius),
-            sin(angle) * (m->type->radius + standard_pikmin_radius)
+            cos(angle) * (m->type->radius + game.config.standard_pikmin_radius),
+            sin(angle) * (m->type->radius + game.config.standard_pikmin_radius)
         );
         spot_info.push_back(carrier_spot_struct(p));
     }
@@ -49,22 +63,18 @@ carry_info_struct::carry_info_struct(mob* m, const size_t destination) :
 
 
 /* ----------------------------------------------------------------------------
- * Deletes a carrier info structure.
- */
-carry_info_struct::~carry_info_struct() {
-    //TODO
-}
-
-
-/* ----------------------------------------------------------------------------
  * Returns the speed at which the object should move, given the carrier Pikmin.
  */
-float carry_info_struct::get_speed() {
+float carry_info_struct::get_speed() const {
+    if(cur_n_carriers == 0) {
+        return 0;
+    }
+    
     float max_speed = 0;
     
     //Begin by obtaining the average walking speed of the carriers.
     for(size_t s = 0; s < spot_info.size(); ++s) {
-        carrier_spot_struct* s_ptr = &spot_info[s];
+        const carrier_spot_struct* s_ptr = &spot_info[s];
         
         if(s_ptr->state != CARRY_SPOT_USED) continue;
         
@@ -76,9 +86,9 @@ float carry_info_struct::get_speed() {
     //If the object has all carriers, the Pikmin move as fast
     //as possible, which looks bad, since they're not jogging,
     //they're carrying. Let's add a penalty for the weight...
-    max_speed *= (1 - carrying_speed_weight_mult * m->type->weight);
+    max_speed *= (1 - game.config.carrying_speed_weight_mult * m->type->weight);
     //...and a global carrying speed penalty.
-    max_speed *= carrying_speed_max_mult;
+    max_speed *= game.config.carrying_speed_max_mult;
     
     //The closer the mob is to having full carriers,
     //the closer to the max speed we get.
@@ -86,9 +96,9 @@ float carry_info_struct::get_speed() {
     //to max_speed (all carriers).
     return
         max_speed * (
-            carrying_speed_base_mult +
+            game.config.carrying_speed_base_mult +
             (cur_n_carriers / (float) spot_info.size()) *
-            (1 - carrying_speed_base_mult)
+            (1 - game.config.carrying_speed_base_mult)
         );
 }
 
@@ -96,7 +106,7 @@ float carry_info_struct::get_speed() {
 /* ----------------------------------------------------------------------------
  * Returns true if no spot is reserved or used. False otherwise.
  */
-bool carry_info_struct::is_empty() {
+bool carry_info_struct::is_empty() const {
     for(size_t s = 0; s < spot_info.size(); ++s) {
         if(spot_info[s].state != CARRY_SPOT_FREE) return false;
     }
@@ -107,7 +117,7 @@ bool carry_info_struct::is_empty() {
 /* ----------------------------------------------------------------------------
  * Returns true if all spots are reserved. False otherwise.
  */
-bool carry_info_struct::is_full() {
+bool carry_info_struct::is_full() const {
     for(size_t s = 0; s < spot_info.size(); ++s) {
         if(spot_info[s].state == CARRY_SPOT_FREE) return false;
     }
@@ -120,13 +130,17 @@ bool carry_info_struct::is_full() {
  * angle away from the mob.
  * This is useful when the first Pikmin is coming, to make the first carry
  * spot be closer to that Pikmin.
+ * angle:
+ *   Angle to rotate to.
  */
 void carry_info_struct::rotate_points(const float angle) {
     for(size_t s = 0; s < spot_info.size(); ++s) {
         float s_angle = angle + (TAU / m->type->max_carriers * s);
         point p(
-            cos(s_angle) * (m->type->radius + standard_pikmin_radius),
-            sin(s_angle) * (m->type->radius + standard_pikmin_radius)
+            cos(s_angle) *
+            (m->type->radius + game.config.standard_pikmin_radius),
+            sin(s_angle) *
+            (m->type->radius + game.config.standard_pikmin_radius)
         );
         spot_info[s].pos = p;
     }
@@ -134,18 +148,25 @@ void carry_info_struct::rotate_points(const float angle) {
 
 
 /* ----------------------------------------------------------------------------
- * Creates a structure with info about a carrying spot.
+ * Creates an instance of a structure with info about what the mob's chasing.
  */
-carrier_spot_struct::carrier_spot_struct(const point &pos) :
-    state(CARRY_SPOT_FREE),
-    pos(pos),
-    pik_ptr(NULL) {
+chase_info_struct::chase_info_struct() :
+    is_chasing(false),
+    orig_coords(nullptr),
+    teleport_z(nullptr),
+    teleport(false),
+    free_move(false),
+    target_dist(0),
+    speed(-1),
+    reached_destination(false) {
     
 }
 
 
 /* ----------------------------------------------------------------------------
  * Creates an instance of a structure with info about the mob's circling.
+ * m:
+ *   Mob this circling info struct belongs to.
  */
 circling_info_struct::circling_info_struct(mob* m) :
     m(m),
@@ -161,11 +182,13 @@ circling_info_struct::circling_info_struct(mob* m) :
 
 /* ----------------------------------------------------------------------------
  * Creates a new group information struct.
+ * leader_ptr:
+ *   Mob this group info struct belongs to.
  */
-group_info::group_info(mob* leader_ptr) :
+group_info_struct::group_info_struct(mob* leader_ptr) :
     radius(0),
     anchor(leader_ptr->pos),
-    transform(identity_transform),
+    transform(game.identity_transform),
     cur_standby_type(nullptr),
     follow_mode(false) {
 }
@@ -175,7 +198,7 @@ group_info::group_info(mob* leader_ptr) :
  * Changes to a different standby subgroup type in case there are no more
  * Pikmin of the current one. Or to no type.
  */
-void group_info::change_standby_type_if_needed() {
+void group_info_struct::change_standby_type_if_needed() {
     for(size_t m = 0; m < members.size(); ++m) {
         if(members[m]->subgroup_type_ptr == cur_standby_type) {
             //Never mind, there is a member of this subgroup type.
@@ -190,7 +213,7 @@ void group_info::change_standby_type_if_needed() {
 /* ----------------------------------------------------------------------------
  * Returns the average position of the members.
  */
-point group_info::get_average_member_pos() {
+point group_info_struct::get_average_member_pos() const {
     point avg;
     for(size_t m = 0; m < members.size(); ++m) {
         avg += members[m]->pos;
@@ -202,8 +225,10 @@ point group_info::get_average_member_pos() {
 /* ----------------------------------------------------------------------------
  * Returns a point's offset from the anchor,
  * given the current group transformation.
+ * spot_index:
+ *   Index of the spot to check.
  */
-point group_info::get_spot_offset(const size_t spot_index) {
+point group_info_struct::get_spot_offset(const size_t spot_index) const {
     point res = spots[spot_index].pos;
     al_transform_coordinates(&transform, &res.x, &res.y);
     return res;
@@ -214,10 +239,11 @@ point group_info::get_spot_offset(const size_t spot_index) {
  * (Re-)Initializes the group spots. This resizes it to the current number
  * of group members. Any old group members are moved to the appropriate
  * new spot.
- * affected_mob_ptr: If this initialization is because a new mob entered
+ * affected_mob_ptr:
+ *   If this initialization is because a new mob entered
  *   or left the group, this should point to said mob.
  */
-void group_info::init_spots(mob* affected_mob_ptr) {
+void group_info_struct::init_spots(mob* affected_mob_ptr) {
     if(members.empty()) {
         spots.clear();
         radius = 0;
@@ -241,7 +267,7 @@ void group_info::init_spots(mob* affected_mob_ptr) {
     
     vector<alpha_spot> alpha_spots;
     size_t current_wheel = 1;
-    radius = standard_pikmin_radius;
+    radius = game.config.standard_pikmin_radius;
     
     //Center spot first.
     alpha_spots.push_back(alpha_spot(point()));
@@ -251,7 +277,7 @@ void group_info::init_spots(mob* affected_mob_ptr) {
         //First, calculate how far the center
         //of these spots are from the central spot.
         float dist_from_center =
-            standard_pikmin_radius * current_wheel + //Spots.
+            game.config.standard_pikmin_radius * current_wheel + //Spots.
             GROUP_SPOT_INTERVAL * current_wheel; //Interval between spots.
             
         /* Now we need to figure out what's the angular distance
@@ -265,7 +291,7 @@ void group_info::init_spots(mob* affected_mob_ptr) {
          * and we know the distance from one spot to the center.
          */
         float actual_diameter =
-            standard_pikmin_radius * 2.0 + GROUP_SPOT_INTERVAL;
+            game.config.standard_pikmin_radius * 2.0 + GROUP_SPOT_INTERVAL;
             
         //Just calculate the remaining side of the triangle, now that we know
         //the hypotenuse and the actual diameter (one side of the triangle).
@@ -367,7 +393,7 @@ void group_info::init_spots(mob* affected_mob_ptr) {
  * Assigns each mob a new spot, given how close each one of them is to
  * each spot.
  */
-void group_info::reassign_spots() {
+void group_info_struct::reassign_spots() {
     for(size_t m = 0; m < members.size(); ++m) {
         members[m]->group_spot_index = INVALID;
     }
@@ -398,9 +424,10 @@ void group_info::reassign_spots() {
  * Sets the standby group member type to the next available one,
  * or NULL if none.
  * Returns true on success, false on failure.
- * move_backwards: If true, go through the list backwards.
+ * move_backwards:
+ *   If true, go through the list backwards.
  */
-bool group_info::set_next_cur_standby_type(const bool move_backwards) {
+bool group_info_struct::set_next_cur_standby_type(const bool move_backwards) {
 
     if(members.empty()) {
         cur_standby_type = NULL;
@@ -410,21 +437,32 @@ bool group_info::set_next_cur_standby_type(const bool move_backwards) {
     bool success = false;
     subgroup_type* starting_type = cur_standby_type;
     subgroup_type* final_type = cur_standby_type;
-    if(!starting_type) starting_type = subgroup_types.get_first_type();
+    if(!starting_type) {
+        starting_type =
+            game.states.gameplay_st->subgroup_types.get_first_type();
+    }
     subgroup_type* scanning_type = starting_type;
     subgroup_type* leader_subgroup_type =
-        subgroup_types.get_type(SUBGROUP_TYPE_CATEGORY_LEADER);
+        game.states.gameplay_st->subgroup_types.get_type(
+            SUBGROUP_TYPE_CATEGORY_LEADER
+        );
         
     if(move_backwards) {
-        scanning_type = subgroup_types.get_prev_type(scanning_type);
+        scanning_type =
+            game.states.gameplay_st->subgroup_types.get_prev_type(
+                scanning_type
+            );
     } else {
-        scanning_type = subgroup_types.get_next_type(scanning_type);
+        scanning_type =
+            game.states.gameplay_st->subgroup_types.get_next_type(
+                scanning_type
+            );
     }
     while(scanning_type != starting_type && !success) {
         //For each type, let's check if there's any group member that matches.
         if(
             scanning_type == leader_subgroup_type &&
-            !can_throw_leaders
+            !game.config.can_throw_leaders
         ) {
             //If this is a leader, and leaders cannot be thrown, skip.
         } else {
@@ -438,9 +476,15 @@ bool group_info::set_next_cur_standby_type(const bool move_backwards) {
         }
         
         if(move_backwards) {
-            scanning_type = subgroup_types.get_prev_type(scanning_type);
+            scanning_type =
+                game.states.gameplay_st->subgroup_types.get_prev_type(
+                    scanning_type
+                );
         } else {
-            scanning_type = subgroup_types.get_next_type(scanning_type);
+            scanning_type =
+                game.states.gameplay_st->subgroup_types.get_next_type(
+                    scanning_type
+                );
         }
     }
     
@@ -452,8 +496,10 @@ bool group_info::set_next_cur_standby_type(const bool move_backwards) {
 /* ----------------------------------------------------------------------------
  * Sorts the group with the specified type at the front, and the other types
  * (in order) behind.
+ * leading_type:
+ *   The subgroup type that will be at the front of the group.
  */
-void group_info::sort(subgroup_type* leading_type) {
+void group_info_struct::sort(subgroup_type* leading_type) {
 
     for(size_t m = 0; m < members.size(); ++m) {
         members[m]->group_spot_index = INVALID;
@@ -485,7 +531,8 @@ void group_info::sort(subgroup_type* leading_type) {
         if(!closest_member) {
             //There are no more members of the current type left!
             //Next type.
-            cur_type = subgroup_types.get_next_type(cur_type);
+            cur_type =
+                game.states.gameplay_st->subgroup_types.get_next_type(cur_type);
         } else {
             spots[cur_spot].mob_ptr = closest_member;
             closest_member->group_spot_index = cur_spot;
@@ -523,8 +570,10 @@ void hold_info_struct::clear() {
 
 /* ----------------------------------------------------------------------------
  * Returns the final coordinates this mob should be at.
+ * final_z:
+ *   The Z coordinate is returned here.
  */
-point hold_info_struct::get_final_pos(float* final_z) {
+point hold_info_struct::get_final_pos(float* final_z) const {
     if(!m) return point();
     
     hitbox* h_ptr = NULL;
@@ -564,8 +613,10 @@ point hold_info_struct::get_final_pos(float* final_z) {
 
 /* ----------------------------------------------------------------------------
  * Initializes a parent mob information struct.
+ * m:
+ *   The parent mob.
  */
-parent_mob_info::parent_mob_info(mob* m) :
+parent_info_struct::parent_info_struct(mob* m) :
     m(m),
     handle_damage(false),
     relay_damage(false),
@@ -585,32 +636,76 @@ parent_mob_info::parent_mob_info(mob* m) :
 
 /* ----------------------------------------------------------------------------
  * Creates an instance of a structure with info about the mob's path-following.
+ * m:
+ *   Mob this path info struct belongs to.
+ * target:
+ *   Its target destination.
  */
 path_info_struct::path_info_struct(mob* m, const point &target) :
     m(m),
     target_point(target),
     cur_path_stop_nr(0),
-    go_straight(false) {
+    go_straight(false),
+    is_blocked(false) {
     
-    path = get_path(m->pos, target, &obstacle_ptrs, &go_straight, NULL);
+    path = get_path(m->pos, target, &go_straight, NULL);
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Calculates whether or not the way forward is currently blocked.
+ */
+bool path_info_struct::check_blockage() {
+    if(
+        path.size() >= 2 &&
+        cur_path_stop_nr > 0 &&
+        cur_path_stop_nr < path.size()
+    ) {
+        path_stop* cur_stop = path[cur_path_stop_nr - 1];
+        path_stop* next_stop = path[cur_path_stop_nr];
+        
+        return
+            cur_stop->links[cur_stop->get_link(next_stop)].blocked_by_obstacle;
+    }
+    return false;
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Creates an instance of a structure with info about the track the mob
+ * is riding.
+ * m:
+ *   Mob this track info struct belongs to.
+ */
+track_info_struct::track_info_struct(mob* m) :
+    m(m),
+    cur_cp_nr(0),
+    cur_cp_progress(0.0f) {
+    
 }
 
 
 /* ----------------------------------------------------------------------------
  * Creates a mob, adding it to the corresponding vectors.
  * Returns the new mob.
- * category:            The category the new mob belongs to.
- * pos:                 Initial position.
- * type:                Type of the new mob.
- * angle:               Initial facing angle.
- * vars:                Script variables.
- * code_after_creation: Code to run right after the mob is created, if any.
+ * category:
+ *   The category the new mob belongs to.
+ * pos:
+ *   Initial position.
+ * type:
+ *   Type of the new mob.
+ * angle:
+ *   Initial facing angle.
+ * vars:
+ *   Script variables.
+ * code_after_creation:
+ *   Code to run right after the mob is created, if any.
  *   This is run before any scripting takes place.
  */
 mob* create_mob(
     mob_category* category, const point &pos, mob_type* type,
     const float angle, const string &vars,
-    function<void(mob*)> code_after_creation
+    std::function<void(mob*)> code_after_creation
 ) {
     mob* m_ptr = category->create_mob(pos, type, angle);
     
@@ -622,13 +717,14 @@ mob* create_mob(
         type->init_actions[a]->run(m_ptr, NULL, NULL);
     }
     
-    m_ptr->read_script_vars(vars);
     if(!vars.empty()) {
-        vector<string> var_name_strings;
-        vector<string> var_value_strings;
-        get_var_vectors(vars, var_name_strings, var_value_strings);
-        for(size_t v = 0; v < var_name_strings.size(); ++v) {
-            m_ptr->vars[var_name_strings[v]] = var_value_strings[v];
+        map<string, string> vars_map = get_var_map(vars);
+        script_var_reader svr(vars_map);
+        
+        m_ptr->read_script_vars(svr);
+        
+        for(auto &v : vars_map) {
+            m_ptr->vars[v.first] = v.second;
         }
     }
     
@@ -661,7 +757,7 @@ mob* create_mob(
         mob* new_mob = m_ptr->spawn(spawn_info);
         if(!new_mob) continue;
         
-        parent_mob_info* p_info = new parent_mob_info(m_ptr);
+        parent_info_struct* p_info = new parent_info_struct(m_ptr);
         new_mob->parent = p_info;
         p_info->handle_damage = child_info->handle_damage;
         p_info->relay_damage = child_info->relay_damage;
@@ -709,12 +805,13 @@ mob* create_mob(
                 new_mob,
                 type->anims.find_body_part(child_info->hold_body_part),
                 child_info->hold_offset_dist,
-                child_info->hold_offset_angle, false
+                child_info->hold_offset_angle, false,
+                child_info->hold_rotation_method
             );
         }
     }
     
-    mobs.push_back(m_ptr);
+    game.states.gameplay_st->mobs.all.push_back(m_ptr);
     return m_ptr;
 }
 
@@ -724,27 +821,30 @@ mob* create_mob(
  * It's always removed from the vector of mobs, but it's
  * also removed from the vector of Pikmin if it's a Pikmin,
  * leaders if it's a leader, etc.
- * m_ptr:                The mob to delete.
- * complete_destruction: If true, don't bother removing it from groups and such,
+ * m_ptr:
+ *   The mob to delete.
+ * complete_destruction:
+ *   If true, don't bother removing it from groups and such,
  *   since everything is going to be destroyed.
  */
 void delete_mob(mob* m_ptr, const bool complete_destruction) {
-    if(creator_tool_info_lock == m_ptr) creator_tool_info_lock = NULL;
+    if(game.maker_tools.info_lock == m_ptr) game.maker_tools.info_lock = NULL;
     
     if(!complete_destruction) {
         m_ptr->leave_group();
         
-        for(size_t m = 0; m < mobs.size(); ++m) {
-            if(mobs[m]->focused_mob == m_ptr) {
-                mobs[m]->fsm.run_event(MOB_EVENT_FOCUSED_MOB_UNCARRIABLE);
-                mobs[m]->fsm.run_event(MOB_EVENT_FOCUS_OFF_REACH);
-                mobs[m]->fsm.run_event(MOB_EVENT_FOCUS_DIED);
-                mobs[m]->focused_mob = NULL;
+        for(size_t m = 0; m < game.states.gameplay_st->mobs.all.size(); ++m) {
+            mob* m2_ptr = game.states.gameplay_st->mobs.all[m];
+            if(m2_ptr->focused_mob == m_ptr) {
+                m2_ptr->fsm.run_event(MOB_EV_FOCUSED_MOB_UNAVAILABLE);
+                m2_ptr->fsm.run_event(MOB_EV_FOCUS_OFF_REACH);
+                m2_ptr->fsm.run_event(MOB_EV_FOCUS_DIED);
+                m2_ptr->focused_mob = NULL;
             }
-            if(mobs[m]->parent && mobs[m]->parent->m == m_ptr) {
-                delete mobs[m]->parent;
-                mobs[m]->parent = NULL;
-                mobs[m]->to_delete = true;
+            if(m2_ptr->parent && m2_ptr->parent->m == m_ptr) {
+                delete m2_ptr->parent;
+                m2_ptr->parent = NULL;
+                m2_ptr->to_delete = true;
             }
         }
         
@@ -752,11 +852,21 @@ void delete_mob(mob* m_ptr, const bool complete_destruction) {
             m_ptr->release(m_ptr->holding[0]);
         }
         
+        if(m_ptr->type->blocks_carrier_pikmin) {
+            game.states.gameplay_st->path_mgr.handle_obstacle_clear(m_ptr);
+        }
+        
         m_ptr->fsm.set_state(INVALID);
     }
     
     m_ptr->type->category->erase_mob(m_ptr);
-    mobs.erase(find(mobs.begin(), mobs.end(), m_ptr));
+    game.states.gameplay_st->mobs.all.erase(
+        find(
+            game.states.gameplay_st->mobs.all.begin(),
+            game.states.gameplay_st->mobs.all.end(),
+            m_ptr
+        )
+    );
     
     delete m_ptr;
 }
@@ -765,17 +875,21 @@ void delete_mob(mob* m_ptr, const bool complete_destruction) {
 /* ----------------------------------------------------------------------------
  * Returns a string that describes the given mob. Used in error messages
  * where you have to indicate a specific mob in the area.
+ * m:
+ *   The mob.
  */
 string get_error_message_mob_info(mob* m) {
     return
         "type \"" + m->type->name + "\", coordinates " +
-        p2s(m->pos) + ", area \"" + cur_area_data.name + "\"";
+        p2s(m->pos) + ", area \"" + game.cur_area_data.name + "\"";
 }
 
 
 /* ----------------------------------------------------------------------------
  * Converts a string to the numeric representation of a mob target type.
  * Returns INVALID if the string is not valid.
+ * type_str:
+ *   Text representation of the target type.
  */
 size_t string_to_mob_target_type(const string &type_str) {
     if(type_str == "none") {
@@ -804,30 +918,14 @@ size_t string_to_mob_target_type(const string &type_str) {
 /* ----------------------------------------------------------------------------
  * Converts a string to the numeric representation of a team.
  * Returns INVALID if the string is not valid.
+ * team_str:
+ *   Text representation of the team.
  */
 size_t string_to_team_nr(const string &team_str) {
-    if(team_str == "none") {
-        return MOB_TEAM_NONE;
-    } else if(team_str == "player_1") {
-        return MOB_TEAM_PLAYER_1;
-    } else if(team_str == "player_2") {
-        return MOB_TEAM_PLAYER_2;
-    } else if(team_str == "player_3") {
-        return MOB_TEAM_PLAYER_3;
-    } else if(team_str == "player_4") {
-        return MOB_TEAM_PLAYER_4;
-    } else if(team_str == "enemy_1") {
-        return MOB_TEAM_ENEMY_1;
-    } else if(team_str == "enemy_2") {
-        return MOB_TEAM_ENEMY_2;
-    } else if(team_str == "enemy_3") {
-        return MOB_TEAM_ENEMY_3;
-    } else if(team_str == "enemy_4") {
-        return MOB_TEAM_ENEMY_4;
-    } else if(team_str == "obstacle") {
-        return MOB_TEAM_OBSTACLE;
-    } else if(team_str == "other") {
-        return MOB_TEAM_OTHER;
+    for(size_t t = 0; t < N_MOB_TEAMS; ++t) {
+        if(team_str == game.team_internal_names[t]) {
+            return t;
+        }
     }
     return INVALID;
 }

@@ -11,26 +11,33 @@
 #include <algorithm>
 #include <queue>
 
-#include <allegro5/allegro.h>
-
 #include "editor.h"
 
 #include "../../functions.h"
-#include "../../LAFI/angle_picker.h"
-#include "../../LAFI/button.h"
-#include "../../LAFI/checkbox.h"
-#include "../../LAFI/frame.h"
-#include "../../LAFI/minor.h"
-#include "../../LAFI/radio_button.h"
-#include "../../LAFI/scrollbar.h"
-#include "../../LAFI/textbox.h"
+#include "../../game.h"
 #include "../../load.h"
-#include "../../mob_categories/pikmin_category.h"
-#include "../../utils/math_utils.h"
 #include "../../utils/string_utils.h"
-#include "../../vars.h"
 
 
+using std::queue;
+
+
+//How many entries of the history to store, at most.
+const size_t animation_editor::HISTORY_SIZE = 6;
+//Amount to pan the camera by when using the keyboard.
+const float animation_editor::KEYBOARD_PAN_AMOUNT = 32.0f;
+//Minimum radius that a hitbox can have.
+const float animation_editor::HITBOX_MIN_RADIUS = 1.0f;
+//How tall the animation timeline header is.
+const size_t animation_editor::TIMELINE_HEADER_HEIGHT = 12;
+//How tall the animation timeline is, in total.
+const size_t animation_editor::TIMELINE_HEIGHT = 48;
+//Size of each side of the triangle that marks the loop frame.
+const size_t animation_editor::TIMELINE_LOOP_TRI_SIZE = 8;
+//Pad the left, right, and bottom of the timeline by this much.
+const size_t animation_editor::TIMELINE_PADDING = 6;
+//Minimum width or height a Pikmin top can have.
+const float animation_editor::TOP_MIN_SIZE = 1.0f;
 //Maximum zoom level possible in the editor.
 const float animation_editor::ZOOM_MAX_LEVEL_EDITOR = 32.0f;
 //Minimum zoom level possible in the editor.
@@ -50,7 +57,6 @@ animation_editor::animation_editor() :
     comparison_sprite(nullptr),
     comparison_tint(true),
     cur_anim(NULL),
-    cur_body_part_nr(INVALID),
     cur_frame_nr(INVALID),
     cur_frame_time(0),
     cur_hitbox(nullptr),
@@ -58,12 +64,16 @@ animation_editor::animation_editor() :
     cur_hitbox_nr(INVALID),
     cur_maturity(0),
     cur_sprite(NULL),
+    cur_sprite_keep_aspect_ratio(true),
+    grid_visible(true),
     hitboxes_visible(true),
     loaded_mob_type(nullptr),
     mob_radius_visible(false),
-    origin_visible(true),
     pikmin_silhouette_visible(false),
-    side_view(false) {
+    reset_load_dialog(true),
+    side_view(false),
+    sprite_bmp_add_mode(false),
+    top_keep_aspect_ratio(true) {
     
     top_bmp[0] = NULL;
     top_bmp[1] = NULL;
@@ -78,12 +88,6 @@ animation_editor::animation_editor() :
         );
     comparison_blink_timer.start();
     
-    cur_hitbox_tc.keep_aspect_ratio = true;
-    cur_sprite_tc.keep_aspect_ratio = true;
-    cur_sprite_tc.allow_rotation = true;
-    top_tc.keep_aspect_ratio = true;
-    top_tc.allow_rotation = true;
-    
     zoom_min_level = ZOOM_MIN_LEVEL_EDITOR;
     zoom_max_level = ZOOM_MAX_LEVEL_EDITOR;
 }
@@ -92,8 +96,10 @@ animation_editor::animation_editor() :
 /* ----------------------------------------------------------------------------
  * Centers the camera on the sprite's parent bitmap, so the user can choose
  * what part of the bitmap they want to use for the sprite.
+ * instant:
+ *   If true, change the camera instantly.
  */
-void animation_editor::center_camera_on_sprite_bitmap() {
+void animation_editor::center_camera_on_sprite_bitmap(const bool instant) {
     if(cur_sprite && cur_sprite->parent_bmp) {
         int bmp_w = al_get_bitmap_width(cur_sprite->parent_bmp);
         int bmp_h = al_get_bitmap_height(cur_sprite->parent_bmp);
@@ -102,9 +108,48 @@ void animation_editor::center_camera_on_sprite_bitmap() {
         
         center_camera(point(bmp_x, bmp_y), point(bmp_x + bmp_w, bmp_y + bmp_h));
     } else {
-        cam_zoom = 1.0f;
-        cam_pos = point();
+        game.cam.target_zoom = 1.0f;
+        game.cam.target_pos = point();
     }
+    
+    if(instant) {
+        game.cam.pos = game.cam.target_pos;
+        game.cam.zoom = game.cam.target_zoom;
+    }
+    update_transformations();
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Changes to a new state, cleaning up whatever is needed.
+ * new_state:
+ *   The new state.
+ */
+void animation_editor::change_state(const EDITOR_STATES new_state) {
+    comparison = false;
+    comparison_sprite = NULL;
+    state = new_state;
+    status_text.clear();
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Code to run when the load dialog is closed.
+ */
+void animation_editor::close_load_dialog() {
+    if(!loaded_content_yet && file_path.empty()) {
+        //The user cancelled the load dialog
+        //presented when you enter the animation editor. Quit out.
+        leave();
+    }
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Code to run when the options dialog is closed.
+ */
+void animation_editor::close_options_dialog() {
+    save_options();
 }
 
 
@@ -114,13 +159,15 @@ void animation_editor::center_camera_on_sprite_bitmap() {
 void animation_editor::do_logic() {
     editor::do_logic_pre();
     
+    process_gui();
+    
     if(
         anim_playing && state == EDITOR_STATE_ANIMATION &&
         cur_anim && cur_frame_nr != INVALID
     ) {
         frame* f = &cur_anim->frames[cur_frame_nr];
         if(f->duration != 0) {
-            cur_frame_time += delta_t;
+            cur_frame_time += game.delta_t;
             
             while(cur_frame_time > f->duration) {
                 cur_frame_time = cur_frame_time - f->duration;
@@ -137,13 +184,12 @@ void animation_editor::do_logic() {
         } else {
             anim_playing = false;
         }
-        animation_to_gui();
     }
     
-    cur_hitbox_alpha += TAU * 1.5 * delta_t;
+    cur_hitbox_alpha += TAU * 1.5 * game.delta_t;
     
     if(comparison_blink) {
-        comparison_blink_timer.tick(delta_t);
+        comparison_blink_timer.tick(game.delta_t);
     } else {
         comparison_blink_show = true;
     }
@@ -153,52 +199,65 @@ void animation_editor::do_logic() {
 
 
 /* ----------------------------------------------------------------------------
- * Enters the side view mode.
+ * Dear ImGui callback for when the canvas needs to be drawn on-screen.
+ * parent_list:
+ *   Unused.
+ * cmd:
+ *   Unused.
  */
-void animation_editor::enter_side_view() {
-    side_view = true;
-    set_checkbox_check(frm_hitboxes, "chk_side_view", true);
-    update_cur_hitbox_tc();
-    cur_hitbox_tc.keep_aspect_ratio = false;
+void animation_editor::draw_canvas_imgui_callback(
+    const ImDrawList* parent_list, const ImDrawCmd* cmd
+) {
+    game.states.animation_editor_st->draw_canvas();
 }
 
 
 /* ----------------------------------------------------------------------------
- * Exits the side view mode.
+ * Returns the name of this state.
  */
-void animation_editor::exit_side_view() {
-    side_view = false;
-    set_checkbox_check(frm_hitboxes, "chk_side_view", false);
-    update_cur_hitbox_tc();
-    cur_hitbox_tc.keep_aspect_ratio = true;
+string animation_editor::get_name() const {
+    return "animation editor";
 }
 
 
 /* ----------------------------------------------------------------------------
- * Returns a file path, but cropped to fit on the gui's buttons.
- * This implies cutting it in two lines, and even replacing the start with
- * ellipsis, if needed.
+ * Returns a file path, but shortened in such a way that only the text file's
+ * name and brief context about its folder remain. If that's not possible, it
+ * is returned as is, though its beginning may be cropped off with ellipsis
+ * if it's too big.
+ * p:
+ *   The long path name.
  */
-string animation_editor::get_cut_path(const string &p) {
-    if(p.size() <= 22) return p;
-    
-    string result = p;
-    if(p.size() > 44) {
-        result = "..." + p.substr(p.size() - 41, 41);
+string animation_editor::get_path_short_name(const string &p) const {
+    if(p.find(TYPES_FOLDER_PATH) != string::npos) {
+        vector<string> path_parts = split(p, "/");
+        if(
+            path_parts.size() > 3 &&
+            path_parts[path_parts.size() - 1] == "Animations.txt"
+        ) {
+            return
+                path_parts[path_parts.size() - 3] + "/" +
+                path_parts[path_parts.size() - 2];
+        }
+    } else if(p.find(ANIMATIONS_FOLDER_PATH) != string::npos) {
+        vector<string> path_parts = split(p, "/");
+        if(!path_parts.empty()) {
+            return path_parts[path_parts.size() - 1];
+        }
     }
     
-    if(p.size() > 22) {
-        result =
-            result.substr(0, result.size() / 2) + "\n" +
-            result.substr(result.size() / 2, (result.size() / 2) + 1);
+    if(p.size() > 33) {
+        return "..." + p.substr(p.size() - 30, 30);
     }
     
-    return result;
+    return p;
 }
 
 
 /* ----------------------------------------------------------------------------
  * Imports the animation data from a different animation to the current.
+ * name:
+ *   Name of the animation to import.
  */
 void animation_editor::import_animation_data(const string &name) {
     animation* a = anims.animations[anims.find_animation(name)];
@@ -207,28 +266,28 @@ void animation_editor::import_animation_data(const string &name) {
     cur_anim->hit_rate = a->hit_rate;
     cur_anim->loop_frame = a->loop_frame;
     
-    animation_to_gui();
-    emit_status_bar_message("Data imported.", false);
+    made_new_changes = true;
 }
 
 
 /* ----------------------------------------------------------------------------
  * Imports the sprite file data from a different sprite to the current.
+ * name:
+ *   Name of the animation to import.
  */
 void animation_editor::import_sprite_file_data(const string &name) {
     sprite* s = anims.sprites[anims.find_sprite(name)];
-    set_textbox_text(frm_sprite_bmp, "txt_file", s->file);
-    set_textbox_text(frm_sprite_bmp, "txt_x", i2s(s->file_pos.x));
-    set_textbox_text(frm_sprite_bmp, "txt_y", i2s(s->file_pos.y));
-    set_textbox_text(frm_sprite_bmp, "txt_w", i2s(s->file_size.x));
-    set_textbox_text(frm_sprite_bmp, "txt_h", i2s(s->file_size.y));
-    gui_to_sprite_bmp();
-    emit_status_bar_message("Data imported.", false);
+    
+    cur_sprite->set_bitmap(s->file, s->file_pos, s->file_size);
+    
+    made_new_changes = true;
 }
 
 
 /* ----------------------------------------------------------------------------
  * Imports the sprite hitbox data from a different sprite to the current.
+ * name:
+ *   Name of the animation to import.
  */
 void animation_editor::import_sprite_hitbox_data(const string &name) {
     for(size_t s = 0; s < anims.sprites.size(); ++s) {
@@ -236,178 +295,92 @@ void animation_editor::import_sprite_hitbox_data(const string &name) {
             cur_sprite->hitboxes = anims.sprites[s]->hitboxes;
         }
     }
+    
     cur_hitbox_nr = INVALID;
     cur_hitbox = NULL;
     if(!cur_sprite->hitboxes.empty()) {
         cur_hitbox_nr = 0;
         cur_hitbox = &cur_sprite->hitboxes[0];
     }
-    hitbox_to_gui();
-    emit_status_bar_message("Data imported.", false);
+    
+    made_new_changes = true;
 }
 
 
 /* ----------------------------------------------------------------------------
  * Imports the sprite top data from a different sprite to the current.
+ * name:
+ *   Name of the animation to import.
  */
 void animation_editor::import_sprite_top_data(const string &name) {
     sprite* s = anims.sprites[anims.find_sprite(name)];
-    set_checkbox_check(frm_top, "chk_visible", s->top_visible);
-    set_textbox_text(frm_top, "txt_x", f2s(s->top_pos.x));
-    set_textbox_text(frm_top, "txt_y", f2s(s->top_pos.y));
-    set_textbox_text(frm_top, "txt_w", f2s(s->top_size.x));
-    set_textbox_text(frm_top, "txt_h", f2s(s->top_size.y));
-    set_angle_picker_angle(frm_top, "ang_angle", s->top_angle);
+    cur_sprite->top_visible = s->top_visible;
+    cur_sprite->top_pos = s->top_pos;
+    cur_sprite->top_size = s->top_size;
+    cur_sprite->top_angle = s->top_angle;
     
-    gui_to_top();
-    emit_status_bar_message("Data imported.", false);
+    made_new_changes = true;
 }
 
 
 /* ----------------------------------------------------------------------------
  * Imports the sprite transformation data from
  * a different sprite to the current.
+ * name:
+ *   Name of the animation to import.
  */
 void animation_editor::import_sprite_transformation_data(const string &name) {
     sprite* s = anims.sprites[anims.find_sprite(name)];
-    set_textbox_text(frm_sprite_tra, "txt_x", f2s(s->offset.x));
-    set_textbox_text(frm_sprite_tra, "txt_y", f2s(s->offset.y));
-    set_textbox_text(frm_sprite_tra, "txt_sx", f2s(s->scale.x));
-    set_textbox_text(frm_sprite_tra, "txt_sy", f2s(s->scale.y));
-    set_angle_picker_angle(frm_sprite_tra, "ang_a", s->angle);
-    
-    gui_to_sprite_transform();
-    emit_status_bar_message("Data imported.", false);
+    cur_sprite->offset = s->offset;
+    cur_sprite->scale = s->scale;
+    cur_sprite->angle = s->angle;
 }
 
 
-static const float FLOOD_FILL_ALPHA_THRESHOLD = 0.008;
 /* ----------------------------------------------------------------------------
- * Performs a flood fill on the bitmap sprite, to see what parts
- * contain non-alpha pixels, based on a starting position.
- * bmp:              Locked bitmap to check.
- * selection_pixels: Array that controls which pixels are selected or not.
- * x, y:             Image coordinates to start on.
+ * Loads the animation editor.
  */
-void animation_editor::sprite_bmp_flood_fill(
-    ALLEGRO_BITMAP* bmp, bool* selection_pixels, const int x, const int y
-) {
-    //https://en.wikipedia.org/wiki/Flood_fill#The_algorithm
-    int bmp_w = al_get_bitmap_width(bmp);
-    int bmp_h = al_get_bitmap_height(bmp);
+void animation_editor::load() {
+    editor::load();
     
-    if(x < 0 || x > bmp_w) return;
-    if(y < 0 || y > bmp_h) return;
-    if(selection_pixels[y * bmp_w + x]) return;
-    if(al_get_pixel(bmp, x, y).a < FLOOD_FILL_ALPHA_THRESHOLD) {
-        return;
-    }
+    load_custom_particle_generators(false);
+    load_status_types(false);
+    load_spray_types(false);
+    load_liquids(false);
+    load_hazards();
+    load_spike_damage_types();
+    load_mob_types(false);
     
-    struct int_point {
-        int x;
-        int y;
-        int_point(point p) :
-            x(p.x),
-            y(p.y) { }
-        int_point(int x, int y) :
-            x(x),
-            y(y) { }
-    };
+    file_path.clear();
+    can_reload = false;
+    can_save = false;
+    loaded_content_yet = false;
+    side_view = false;
+    change_state(EDITOR_STATE_MAIN);
     
-    queue<int_point> pixels_left;
-    pixels_left.push(int_point(x, y));
-    
-    while(!pixels_left.empty()) {
-        int_point p = pixels_left.front();
-        pixels_left.pop();
-        
-        if(
-            selection_pixels[(p.y) * bmp_w + p.x] ||
-            al_get_pixel(bmp, p.x, p.y).a < FLOOD_FILL_ALPHA_THRESHOLD
-        ) {
-            continue;
-        }
-        
-        int_point offset = p;
-        vector<int_point> columns;
-        columns.push_back(p);
-        
-        bool add = true;
-        //Keep going left and adding columns to check.
-        while(add) {
-            if(offset.x  == 0) {
-                add = false;
-            } else {
-                offset.x--;
-                if(selection_pixels[offset.y * bmp_w + offset.x]) {
-                    add = false;
-                } else if(
-                    al_get_pixel(bmp, offset.x, offset.y).a <
-                    FLOOD_FILL_ALPHA_THRESHOLD
-                ) {
-                    add = false;
-                } else {
-                    columns.push_back(offset);
-                }
-            }
-        }
-        offset = p;
-        add = true;
-        //Keep going right and adding columns to check.
-        while(add) {
-            if(offset.x == bmp_w - 1) {
-                add = false;
-            } else {
-                offset.x++;
-                if(selection_pixels[offset.y * bmp_w + offset.x]) {
-                    add = false;
-                } else if(
-                    al_get_pixel(bmp, offset.x, offset.y).a <
-                    FLOOD_FILL_ALPHA_THRESHOLD
-                ) {
-                    add = false;
-                } else {
-                    columns.push_back(offset);
-                }
-            }
-        }
-        
-        for(size_t c = 0; c < columns.size(); ++c) {
-            //For each column obtained, mark the pixel there,
-            //and check the pixels above and below, to see if they should be
-            //processed next.
-            int_point col = columns[c];
-            selection_pixels[col.y * bmp_w + col.x] = true;
-            if(
-                col.y > 0 &&
-                !selection_pixels[(col.y - 1) * bmp_w + col.x] &&
-                al_get_pixel(bmp, col.x, col.y - 1).a >=
-                FLOOD_FILL_ALPHA_THRESHOLD
-            ) {
-                pixels_left.push(int_point(col.x, col.y - 1));
-            }
-            if(
-                col.y < bmp_h - 1 &&
-                !selection_pixels[(col.y + 1) * bmp_w + col.x] &&
-                al_get_pixel(bmp, col.x, col.y + 1).a >=
-                FLOOD_FILL_ALPHA_THRESHOLD
-            ) {
-                pixels_left.push(int_point(col.x, col.y + 1));
-            }
-        }
+    if(!auto_load_anim.empty()) {
+        loaded_mob_type = NULL;
+        file_path = auto_load_anim;
+        load_animation_database(true);
+    } else {
+        open_load_dialog();
     }
 }
 
 
 /* ----------------------------------------------------------------------------
  * Loads the animation database for the current object.
+ * should_update_history:
+ *   If true, this loading process should update the user's file open history.
  */
-void animation_editor::load_animation_database(const bool update_history) {
+void animation_editor::load_animation_database(
+    const bool should_update_history
+) {
     if(state == EDITOR_STATE_SPRITE_BITMAP) {
         //Ideally, states would be handled by a state machine, and this
         //logic would be placed in the sprite bitmap state's "on exit" code...
-        cam_pos = pre_sprite_bmp_cam_pos;
-        cam_zoom = pre_sprite_bmp_cam_zoom;
+        game.cam.set_pos(pre_sprite_bmp_cam_pos);
+        game.cam.set_zoom(pre_sprite_bmp_cam_zoom);
     }
     
     file_path = standardize_path(file_path);
@@ -426,50 +399,38 @@ void animation_editor::load_animation_database(const bool update_history) {
     cur_frame_nr = INVALID;
     cur_hitbox = NULL;
     cur_hitbox_nr = INVALID;
-    if(!anims.animations.empty()) {
-        cur_anim = anims.animations[0];
-        if(cur_anim->frames.size()) cur_frame_nr = 0;
-    }
-    if(!anims.sprites.empty()) {
-        cur_sprite = anims.sprites[0];
-        if(!cur_sprite->hitboxes.empty()) {
-            cur_hitbox = &cur_sprite->hitboxes[0];
-            cur_hitbox_nr = 0;
-        }
-    }
     
-    enable_widget(frm_toolbar->widgets["but_reload"]);
-    enable_widget(frm_toolbar->widgets["but_save"]);
-    frm_hitboxes->hide();
-    frm_top->hide();
+    can_reload = true;
+    can_save = true;
     
-    cam_pos.x = cam_pos.y = 0;
-    cam_zoom = 1;
+    game.cam.set_pos(point());
+    game.cam.set_zoom(1.0f);
     
     //Find the most popular file name to suggest for new sprites.
-    last_file_used.clear();
+    last_spritesheet_used.clear();
     
     if(!anims.sprites.empty()) {
         map<string, size_t> file_uses_map;
-        vector<pair<size_t, string> > file_uses_vector;
+        vector<std::pair<size_t, string> > file_uses_vector;
         for(size_t f = 0; f < anims.sprites.size(); ++f) {
             file_uses_map[anims.sprites[f]->file]++;
         }
-        for(auto u = file_uses_map.begin(); u != file_uses_map.end(); ++u) {
-            file_uses_vector.push_back(make_pair(u->second, u->first));
+        for(auto &u : file_uses_map) {
+            file_uses_vector.push_back(make_pair(u.second, u.first));
         }
-        sort(
+        std::sort(
             file_uses_vector.begin(),
             file_uses_vector.end(),
-        [] (pair<size_t, string> u1, pair<size_t, string> u2) -> bool {
+            [] (
+                std::pair<size_t, string> u1, std::pair<size_t, string> u2
+        ) -> bool {
             return u1.first > u2.first;
         }
         );
-        last_file_used = file_uses_vector[0].second;
+        last_spritesheet_used = file_uses_vector[0].second;
     }
     
     vector<string> file_path_parts = split(file_path, "/");
-    set_button_text(frm_main, "but_file", get_cut_path(file_path));
     
     if(file_path.find(TYPES_FOLDER_PATH) != string::npos) {
         vector<string> path_parts = split(file_path, "/");
@@ -478,12 +439,12 @@ void animation_editor::load_animation_database(const bool update_history) {
             path_parts[path_parts.size() - 1] == "Animations.txt"
         ) {
             mob_category* cat =
-                mob_categories.get_from_pname(
-                    path_parts[path_parts.size() - 3]
+                game.mob_categories.get_from_folder_name(
+                    TYPES_FOLDER_PATH + "/" + path_parts[path_parts.size() - 3]
                 );
             if(cat) {
                 loaded_mob_type =
-                    mob_categories.find_mob_type_from_folder_name(
+                    game.mob_categories.find_mob_type_from_folder_name(
                         cat,
                         path_parts[path_parts.size() - 2]
                     );
@@ -493,7 +454,7 @@ void animation_editor::load_animation_database(const bool update_history) {
     
     //Top bitmap.
     for(unsigned char t = 0; t < N_MATURITIES; ++t) {
-        if(top_bmp[t] && top_bmp[t] != bmp_error) {
+        if(top_bmp[t] && top_bmp[t] != game.bmp_error) {
             al_destroy_bitmap(top_bmp[t]);
             top_bmp[t] = NULL;
         }
@@ -505,7 +466,7 @@ void animation_editor::load_animation_database(const bool update_history) {
     ) {
         data_node data =
             load_data_file(
-                PIKMIN_FOLDER_PATH + "/" +
+                loaded_mob_type->category->folder + "/" +
                 file_path_parts[file_path_parts.size() - 2] +
                 "/Data.txt"
             );
@@ -517,114 +478,319 @@ void animation_editor::load_animation_database(const bool update_history) {
             load_bmp(data.get_child_by_name("top_flower")->value, &data);
     }
     
-    if(update_history) {
-        update_animation_editor_history(file_path);
+    if(should_update_history) {
+        update_history(file_path);
         save_options(); //Save the history on the options.
     }
     
-    frm_toolbar->show();
-    state = EDITOR_STATE_MAIN;
-    change_to_right_frame();
+    change_state(EDITOR_STATE_MAIN);
     loaded_content_yet = true;
-    update_stats();
     
-    emit_status_bar_message("Loaded successfully.", false);
+    status_text = "Loaded file successfully.";
 }
 
 
 /* ----------------------------------------------------------------------------
- * Opens the correct radio button and frame for the specified hitbox type.
+ * Callback for when the user picks an animation from the picker.
+ * name:
+ *   Name of the animation.
+ * category:
+ *   Unused.
+ * is_new:
+ *   Is this a new animation or an existing one?
  */
-void animation_editor::open_hitbox_type(unsigned char type) {
-    lafi::widget* f = frm_hitboxes->widgets["frm_hitbox"];
-    
-    set_radio_selection(f, "rad_normal", false);
-    set_radio_selection(f, "rad_attack", false);
-    set_radio_selection(f, "rad_disabled", false);
-    
-    frm_normal_h->hide();
-    frm_attack_h->hide();
-    
-    if(type == HITBOX_TYPE_NORMAL) {
-        set_radio_selection(f, "rad_normal", true);
-        frm_normal_h->show();
-    } else if(type == HITBOX_TYPE_ATTACK) {
-        set_radio_selection(f, "rad_attack", true);
-        frm_attack_h->show();
-    } else {
-        set_radio_selection(f, "rad_disabled", true);
+void animation_editor::pick_animation(
+    const string &name, const string &category, const bool is_new
+) {
+    if(is_new) {
+        anims.animations.push_back(new animation(name));
+        anims.sort_alphabetically();
+        made_new_changes = true;
+        status_text = "Created animation \"" + name + "\".";
+    }
+    cur_anim = anims.animations[anims.find_animation(name)];
+    cur_frame_nr = (cur_anim->frames.size()) ? 0 : INVALID;
+    cur_frame_time = 0;
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Callback for when the user picks a sprite from the picker.
+ * name:
+ *   Name of the sprite.
+ * category:
+ *   Unused.
+ * is_new:
+ *   Is this a new sprite or an existing one?
+ */
+void animation_editor::pick_sprite(
+    const string &name, const string &category, const bool is_new
+) {
+    if(is_new) {
+        if(anims.find_sprite(name) == INVALID) {
+            anims.sprites.push_back(new sprite(name));
+            anims.sprites.back()->create_hitboxes(
+                &anims,
+                loaded_mob_type ? loaded_mob_type->height : 128,
+                loaded_mob_type ? loaded_mob_type->radius : 32
+            );
+            anims.sort_alphabetically();
+            made_new_changes = true;
+            status_text = "Created sprite \"" + name + "\".";
+        }
+    }
+    cur_sprite = anims.sprites[anims.find_sprite(name)];
+    cur_hitbox = NULL;
+    cur_hitbox_nr = INVALID;
+    if(is_new) {
+        //New sprite. Suggest file name.
+        cur_sprite->set_bitmap(last_spritesheet_used, point(), point());
     }
 }
 
 
 /* ----------------------------------------------------------------------------
- * Renames the chosen animation to the chosen name, in the "tools" menu.
+ * Code to run when the grid button widget is pressed.
  */
-void animation_editor::rename_animation() {
-    lafi::button* but_ptr =
-        (lafi::button*) frm_tools->widgets["but_rename_anim_name"];
-    lafi::textbox* txt_ptr =
-        (lafi::textbox*) frm_tools->widgets["txt_rename_anim"];
-    size_t old_anim_id = INVALID;
-    string old_name = but_ptr->text;
-    string new_name = txt_ptr->text;
+void animation_editor::press_grid_button() {
+    grid_visible = !grid_visible;
+    string state_str = (grid_visible ? "Enabled" : "Disabled");
+    status_text = state_str + " grid visibility.";
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Code to run when the hitboxes button widget is pressed.
+ */
+void animation_editor::press_hitboxes_button() {
+    hitboxes_visible = !hitboxes_visible;
+    string state_str = (hitboxes_visible ? "Enabled" : "Disabled");
+    status_text = state_str + " hitbox visibility.";
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Code to run when the load file button widget is pressed.
+ */
+void animation_editor::press_load_button() {
+    if(!check_new_unsaved_changes(load_widget_pos)) {
+        open_load_dialog();
+    }
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Code to run when the mob radius button widget is pressed.
+ */
+void animation_editor::press_mob_radius_button() {
+    mob_radius_visible = !mob_radius_visible;
+    string state_str = (mob_radius_visible ? "Enabled" : "Disabled");
+    status_text = state_str + " object radius visibility.";
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Code to run when the Pikmin silhouette button widget is pressed.
+ */
+void animation_editor::press_pikmin_silhouette_button() {
+    pikmin_silhouette_visible = !pikmin_silhouette_visible;
+    string state_str = (pikmin_silhouette_visible ? "Enabled" : "Disabled");
+    status_text = state_str + " Pikmin silhouette visibility.";
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Code to run when the play animation button widget is pressed.
+ */
+void animation_editor::press_play_animation_button() {
+    if(cur_anim->frames.empty()) {
+        anim_playing = false;
+    } else {
+        anim_playing = !anim_playing;
+        if(
+            !cur_anim->frames.empty() &&
+            cur_frame_nr == INVALID
+        ) {
+            cur_frame_nr = 0;
+        }
+        cur_frame_time = 0;
+        if(anim_playing) {
+            status_text = "Animation playback started.";
+        } else {
+            status_text = "Animation playback stopped.";
+        }
+    }
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Code to run when the quit button widget is pressed.
+ */
+void animation_editor::press_quit_button() {
+    if(!check_new_unsaved_changes(quit_widget_pos)) {
+        status_text = "Bye!";
+        leave();
+    }
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Code to run when the reload button widget is pressed.
+ */
+void animation_editor::press_reload_button() {
+    if(!can_reload) return;
+    if(!check_new_unsaved_changes(reload_widget_pos)) {
+        load_animation_database(false);
+    }
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Code to run when the save button widget is pressed.
+ */
+void animation_editor::press_save_button() {
+    if(!can_save) return;
+    save_animation_database();
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Renames an animation to the given name.
+ * a:
+ *   Animation to rename.
+ * new_name:
+ *   Its new name.
+ */
+void animation_editor::rename_animation(animation* a, const string &new_name) {
+    //Check if it's valid.
+    if(!a) {
+        return;
+    }
     
+    string old_name = a->name;
+    
+    //Check if the name is the same.
+    if(new_name == old_name) {
+        status_text.clear();
+        return;
+    }
+    
+    //Check if the name is empty.
     if(new_name.empty()) {
-        emit_status_bar_message("You need to specify the new name!", true);
+        status_text = "You need to specify the animation's new name!";
         return;
     }
     
     //Check if the name already exists.
     for(size_t a = 0; a < anims.animations.size(); ++a) {
-        if(anims.animations[a]->name == old_name) old_anim_id = a;
         if(anims.animations[a]->name == new_name) {
-            emit_status_bar_message("That name is already being used!", true);
+            status_text =
+                "An animation by the name \"" + new_name + "\" already exists!";
             return;
         }
     }
     
-    if(old_anim_id == INVALID) return;
-    
-    anims.animations[old_anim_id]->name = new_name;
+    //Rename!
+    a->name = new_name;
     anims.sort_alphabetically();
     
-    but_ptr->text = "";
-    txt_ptr->text = "";
-    
     made_new_changes = true;
-    emit_status_bar_message("Renamed successfully.", false);
+    status_text =
+        "Renamed animation \"" + old_name + "\" to \"" + new_name + "\".";
 }
 
 
 /* ----------------------------------------------------------------------------
- * Renames the chosen sprite to the chosen name, in the "tools" menu.
+ * Renames a body part to the given name.
+ * p:
+ *   Body part to rename.
+ * new_name:
+ *   Its new name.
  */
-void animation_editor::rename_sprite() {
-    lafi::button* but_ptr =
-        (lafi::button*) frm_tools->widgets["but_rename_sprite_name"];
-    lafi::textbox* txt_ptr =
-        (lafi::textbox*) frm_tools->widgets["txt_rename_sprite"];
-    size_t old_sprite_id = INVALID;
-    string old_name = but_ptr->text;
-    string new_name = txt_ptr->text;
+void animation_editor::rename_body_part(body_part* p, const string &new_name) {
+    //Check if it's valid.
+    if(!p) {
+        return;
+    }
     
+    string old_name = p->name;
+    
+    //Check if the name is the same.
+    if(new_name == old_name) {
+        status_text.clear();
+        return;
+    }
+    
+    //Check if the name is empty.
     if(new_name.empty()) {
-        emit_status_bar_message("You need to specify the new name!", true);
+        status_text = "You need to specify the body part's new name!";
+        return;
+    }
+    
+    //Check if the name already exists.
+    for(size_t b = 0; b < anims.body_parts.size(); ++b) {
+        if(anims.body_parts[b]->name == new_name) {
+            status_text =
+                "A body part by the name \"" + new_name + "\" already exists!";
+            return;
+        }
+    }
+    
+    //Rename!
+    for(size_t s = 0; s < anims.sprites.size(); ++s) {
+        for(size_t h = 0; h < anims.sprites[s]->hitboxes.size(); ++h) {
+            if(anims.sprites[s]->hitboxes[h].body_part_name == old_name) {
+                anims.sprites[s]->hitboxes[h].body_part_name = new_name;
+            }
+        }
+    }
+    p->name = new_name;
+    update_hitboxes();
+    
+    made_new_changes = true;
+    status_text =
+        "Renamed body part \"" + old_name + "\" to \"" + new_name + "\".";
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Renames a sprite to the given name.
+ * s:
+ *   Sprite to rename.
+ * new_name:
+ *   Its new name.
+ */
+void animation_editor::rename_sprite(sprite* s, const string &new_name) {
+    //Check if it's valid.
+    if(!s) {
+        return;
+    }
+    
+    string old_name = s->name;
+    
+    //Check if the name is the same.
+    if(new_name == old_name) {
+        status_text.clear();
+        return;
+    }
+    
+    //Check if the name is empty.
+    if(new_name.empty()) {
+        status_text = "You need to specify the sprite's new name!";
         return;
     }
     
     //Check if the name already exists.
     for(size_t s = 0; s < anims.sprites.size(); ++s) {
-        if(anims.sprites[s]->name == old_name) old_sprite_id = s;
         if(anims.sprites[s]->name == new_name) {
-            emit_status_bar_message("That name is already being used!", true);
+            status_text =
+                "A sprite by the name \"" + new_name + "\" already exists!";
             return;
         }
     }
     
-    if(old_sprite_id == INVALID) return;
-    
-    anims.sprites[old_sprite_id]->name = new_name;
+    //Rename!
+    s->name = new_name;
     for(size_t a = 0; a < anims.animations.size(); ++a) {
         animation* a_ptr = anims.animations[a];
         for(size_t f = 0; f < a_ptr->frames.size(); ++f) {
@@ -635,44 +801,67 @@ void animation_editor::rename_sprite() {
     }
     anims.sort_alphabetically();
     
-    but_ptr->text = "";
-    txt_ptr->text = "";
-    
     made_new_changes = true;
-    emit_status_bar_message("Renamed successfully.", false);
+    status_text =
+        "Renamed sprite \"" + old_name + "\" to \"" + new_name + "\".";
 }
 
 
 /* ----------------------------------------------------------------------------
- * Resizes sprites, body parts, etc. by a multiplier.
+ * Resizes all sprites, hitboxes, etc. by a multiplier.
+ * mult:
+ *   Multiplier to resize by.
  */
-void animation_editor::resize_everything() {
-    float mult = s2f(get_textbox_text(frm_tools, "txt_resize"));
-    
-    if(mult == 0) {
-        emit_status_bar_message("Can't resize everything to size 0!", true);
+void animation_editor::resize_everything(const float mult) {
+    if(mult == 0.0f) {
+        status_text = "Can't resize everything to size 0!";
+        return;
+    }
+    if(mult == 1.0f) {
+        status_text = "Resizing everything by 1 wouldn't make a difference!";
         return;
     }
     
     for(size_t s = 0; s < anims.sprites.size(); ++s) {
-        sprite* s_ptr = anims.sprites[s];
-        
-        s_ptr->scale    *= mult;
-        s_ptr->offset   *= mult;
-        s_ptr->top_pos  *= mult;
-        s_ptr->top_size *= mult;
-        
-        for(size_t h = 0; h < s_ptr->hitboxes.size(); ++h) {
-            hitbox* h_ptr = &s_ptr->hitboxes[h];
-            
-            h_ptr->radius *= mult;
-            h_ptr->pos    *= mult;
-        }
+        resize_sprite(anims.sprites[s], mult);
     }
     
-    set_textbox_text(frm_tools, "txt_resize", "");
     made_new_changes = true;
-    emit_status_bar_message("Resized successfully.", false);
+    status_text = "Resized everything by " + f2s(mult) + ".";
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Resizes a sprite by a multiplier.
+ * s:
+ *   Sprite to resize.
+ * mult:
+ *   Multiplier to resize by.
+ */
+void animation_editor::resize_sprite(sprite* s, const float mult) {
+    if(mult == 0.0f) {
+        status_text = "Can't resize a sprite to size 0!";
+        return;
+    }
+    if(mult == 1.0f) {
+        status_text = "Resizing a sprite by 1 wouldn't make a difference!";
+        return;
+    }
+    
+    s->scale    *= mult;
+    s->offset   *= mult;
+    s->top_pos  *= mult;
+    s->top_size *= mult;
+    
+    for(size_t h = 0; h < s->hitboxes.size(); ++h) {
+        hitbox* h_ptr = &s->hitboxes[h];
+        
+        h_ptr->radius = fabs(h_ptr->radius * mult);
+        h_ptr->pos    *= mult;
+    }
+    
+    made_new_changes = true;
+    status_text = "Resized sprite by " + f2s(mult) + ".";
 }
 
 
@@ -806,7 +995,10 @@ void animation_editor::save_animation_database() {
                         new data_node("hazards", h_ptr->hazards_str)
                     );
                 }
-                if(h_ptr->knockback_outward) {
+                if(
+                    h_ptr->type == HITBOX_TYPE_ATTACK &&
+                    h_ptr->knockback_outward
+                ) {
                     hitbox_node->add(
                         new data_node(
                             "knockback_outward",
@@ -814,19 +1006,28 @@ void animation_editor::save_animation_database() {
                         )
                     );
                 }
-                if(h_ptr->knockback_angle != 0) {
+                if(
+                    h_ptr->type == HITBOX_TYPE_ATTACK &&
+                    h_ptr->knockback_angle != 0
+                ) {
                     hitbox_node->add(
                         new data_node(
                             "knockback_angle", f2s(h_ptr->knockback_angle)
                         )
                     );
                 }
-                if(h_ptr->knockback != 0) {
+                if(
+                    h_ptr->type == HITBOX_TYPE_ATTACK &&
+                    h_ptr->knockback != 0
+                ) {
                     hitbox_node->add(
                         new data_node("knockback", f2s(h_ptr->knockback))
                     );
                 }
-                if(h_ptr->wither_chance > 0) {
+                if(
+                    h_ptr->type == HITBOX_TYPE_ATTACK &&
+                    h_ptr->wither_chance > 0
+                ) {
                     hitbox_node->add(
                         new data_node(
                             "wither_chance", i2s(h_ptr->wither_chance)
@@ -859,9 +1060,9 @@ void animation_editor::save_animation_database() {
             NULL,
             ALLEGRO_MESSAGEBOX_WARN
         );
-        emit_status_bar_message("Could not save the animation!", true);
+        status_text = "Could not save the animation file!";
     } else {
-        emit_status_bar_message("Saved successfully.", false);
+        status_text = "Saved file successfully.";
     }
     made_new_changes = false;
 }
@@ -869,24 +1070,147 @@ void animation_editor::save_animation_database() {
 
 /* ----------------------------------------------------------------------------
  * Sets all sprite scales to the value specified in the textbox.
+ * scale:
+ *   Value to set the scales to.
  */
-void animation_editor::set_all_sprite_scales() {
-    float mult = s2f(get_textbox_text(frm_tools, "txt_set_scales"));
-    
-    if(mult == 0) {
-        emit_status_bar_message("The scales can't be 0!", true);
+void animation_editor::set_all_sprite_scales(const float scale) {
+    if(scale == 0) {
+        status_text = "The scales can't be 0!";
         return;
     }
     
     for(size_t s = 0; s < anims.sprites.size(); ++s) {
         sprite* s_ptr = anims.sprites[s];
-        s_ptr->scale.x = mult;
-        s_ptr->scale.y = mult;
+        s_ptr->scale.x = scale;
+        s_ptr->scale.y = scale;
     }
     
-    set_textbox_text(frm_tools, "txt_set_scales", "");
     made_new_changes = true;
-    emit_status_bar_message("Sprite scales set successfully.", false);
+    status_text = "Set all sprite scales to " + f2s(scale) + ".";
+}
+
+
+static const float FLOOD_FILL_ALPHA_THRESHOLD = 0.008;
+
+/* ----------------------------------------------------------------------------
+ * Performs a flood fill on the bitmap sprite, to see what parts
+ * contain non-alpha pixels, based on a starting position.
+ * bmp:
+ *   Locked bitmap to check.
+ * selection_pixels:
+ *   Array that controls which pixels are selected or not.
+ * x:
+ *   X coordinate to start on.
+ * y:
+ *   Y coordinate to start on.
+ */
+void animation_editor::sprite_bmp_flood_fill(
+    ALLEGRO_BITMAP* bmp, bool* selection_pixels, const int x, const int y
+) {
+    //https://en.wikipedia.org/wiki/Flood_fill#The_algorithm
+    int bmp_w = al_get_bitmap_width(bmp);
+    int bmp_h = al_get_bitmap_height(bmp);
+    
+    if(x < 0 || x > bmp_w) return;
+    if(y < 0 || y > bmp_h) return;
+    if(selection_pixels[y * bmp_w + x]) return;
+    if(al_get_pixel(bmp, x, y).a < FLOOD_FILL_ALPHA_THRESHOLD) {
+        return;
+    }
+    
+    struct int_point {
+        int x;
+        int y;
+        int_point(point p) :
+            x(p.x),
+            y(p.y) { }
+        int_point(int x, int y) :
+            x(x),
+            y(y) { }
+    };
+    
+    queue<int_point> pixels_left;
+    pixels_left.push(int_point(x, y));
+    
+    while(!pixels_left.empty()) {
+        int_point p = pixels_left.front();
+        pixels_left.pop();
+        
+        if(
+            selection_pixels[(p.y) * bmp_w + p.x] ||
+            al_get_pixel(bmp, p.x, p.y).a < FLOOD_FILL_ALPHA_THRESHOLD
+        ) {
+            continue;
+        }
+        
+        int_point offset = p;
+        vector<int_point> columns;
+        columns.push_back(p);
+        
+        bool add = true;
+        //Keep going left and adding columns to check.
+        while(add) {
+            if(offset.x  == 0) {
+                add = false;
+            } else {
+                offset.x--;
+                if(selection_pixels[offset.y * bmp_w + offset.x]) {
+                    add = false;
+                } else if(
+                    al_get_pixel(bmp, offset.x, offset.y).a <
+                    FLOOD_FILL_ALPHA_THRESHOLD
+                ) {
+                    add = false;
+                } else {
+                    columns.push_back(offset);
+                }
+            }
+        }
+        offset = p;
+        add = true;
+        //Keep going right and adding columns to check.
+        while(add) {
+            if(offset.x == bmp_w - 1) {
+                add = false;
+            } else {
+                offset.x++;
+                if(selection_pixels[offset.y * bmp_w + offset.x]) {
+                    add = false;
+                } else if(
+                    al_get_pixel(bmp, offset.x, offset.y).a <
+                    FLOOD_FILL_ALPHA_THRESHOLD
+                ) {
+                    add = false;
+                } else {
+                    columns.push_back(offset);
+                }
+            }
+        }
+        
+        for(size_t c = 0; c < columns.size(); ++c) {
+            //For each column obtained, mark the pixel there,
+            //and check the pixels above and below, to see if they should be
+            //processed next.
+            int_point col = columns[c];
+            selection_pixels[col.y * bmp_w + col.x] = true;
+            if(
+                col.y > 0 &&
+                !selection_pixels[(col.y - 1) * bmp_w + col.x] &&
+                al_get_pixel(bmp, col.x, col.y - 1).a >=
+                FLOOD_FILL_ALPHA_THRESHOLD
+            ) {
+                pixels_left.push(int_point(col.x, col.y - 1));
+            }
+            if(
+                col.y < bmp_h - 1 &&
+                !selection_pixels[(col.y + 1) * bmp_w + col.x] &&
+                al_get_pixel(bmp, col.x, col.y + 1).a >=
+                FLOOD_FILL_ALPHA_THRESHOLD
+            ) {
+                pixels_left.push(int_point(col.x, col.y + 1));
+            }
+        }
+    }
 }
 
 
@@ -897,9 +1221,6 @@ void animation_editor::unload() {
     editor::unload();
     
     anims.destroy();
-    delete(gui_style);
-    delete(faded_style);
-    delete(gui);
     
     unload_mob_types(false);
     unload_spike_damage_types();
@@ -909,6 +1230,41 @@ void animation_editor::unload() {
     unload_status_types(false);
     unload_custom_particle_generators();
 }
+
+
+/* ----------------------------------------------------------------------------
+ * Updates the history list, by adding a new entry or bumping it up.
+ * n:
+ *   Name of the entry.
+ */
+void animation_editor::update_history(const string &n) {
+    //First, check if it exists.
+    size_t pos = INVALID;
+    
+    for(size_t h = 0; h < history.size(); ++h) {
+        if(history[h] == n) {
+            pos = h;
+            break;
+        }
+    }
+    
+    if(pos == 0) {
+        //Already #1? Never mind.
+        return;
+    } else if(pos == INVALID) {
+        //If it doesn't exist, create it and add it to the top.
+        history.insert(history.begin(), n);
+    } else {
+        //Otherwise, remove it from its spot and bump it to the top.
+        history.erase(history.begin() + pos);
+        history.insert(history.begin(), n);
+    }
+    
+    if(history.size() > HISTORY_SIZE) {
+        history.erase(history.begin() + history.size() - 1);
+    }
+}
+
 
 /* ----------------------------------------------------------------------------
  * Update every frame's hitbox instances in light of new hitbox info.
@@ -977,6 +1333,3 @@ void animation_editor::update_hitboxes() {
         );
     }
 }
-
-
-animation_editor::~animation_editor() { }

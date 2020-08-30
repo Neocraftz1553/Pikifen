@@ -14,16 +14,39 @@
 
 #include "../../drawing.h"
 #include "../../functions.h"
+#include "../../game.h"
+#include "../../imgui/imgui_impl_allegro5.h"
 #include "../../utils/string_utils.h"
-#include "../../vars.h"
+
 
 /* ----------------------------------------------------------------------------
  * Handles the drawing part of the main loop of the area editor.
  */
 void area_editor::do_drawing() {
-    gui->draw();
+    //Render what is needed for the GUI.
+    //This will also render the canvas in due time.
+    ImGui::Render();
     
-    al_use_transform(&world_to_screen_transform);
+    //Actually draw the GUI + canvas on-screen.
+    al_clear_to_color(al_map_rgb(0, 0, 0));
+    ImGui_ImplAllegro5_RenderDrawData(ImGui::GetDrawData());
+    
+    draw_unsaved_changes_warning();
+    
+    //And the fade manager atop it all.
+    game.fade_mgr.draw();
+    
+    //Finally, swap buffers.
+    al_flip_display();
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Draw the canvas. This is called as a callback inside the
+ * ImGui rendering process.
+ */
+void area_editor::draw_canvas() {
+    al_use_transform(&game.world_to_screen_transform);
     al_set_clipping_rectangle(
         canvas_tl.x, canvas_tl.y,
         canvas_br.x - canvas_tl.x, canvas_br.y - canvas_tl.y
@@ -34,17 +57,17 @@ void area_editor::do_drawing() {
     float lowest_sector_z = 0.0f;
     float highest_sector_z = 0.0f;
     if(
-        area_editor_view_mode == VIEW_MODE_HEIGHTMAP &&
-        !cur_area_data.sectors.empty()
+        game.options.area_editor_view_mode == VIEW_MODE_HEIGHTMAP &&
+        !game.cur_area_data.sectors.empty()
     ) {
-        lowest_sector_z = cur_area_data.sectors[0]->z;
+        lowest_sector_z = game.cur_area_data.sectors[0]->z;
         highest_sector_z = lowest_sector_z;
         
-        for(size_t s = 1; s < cur_area_data.sectors.size(); ++s) {
+        for(size_t s = 1; s < game.cur_area_data.sectors.size(); ++s) {
             lowest_sector_z =
-                min(lowest_sector_z, cur_area_data.sectors[s]->z);
+                std::min(lowest_sector_z, game.cur_area_data.sectors[s]->z);
             highest_sector_z =
-                max(highest_sector_z, cur_area_data.sectors[s]->z);
+                std::max(highest_sector_z, game.cur_area_data.sectors[s]->z);
         }
     }
     
@@ -54,39 +77,73 @@ void area_editor::do_drawing() {
     float edges_opacity = 0.25f;
     float grid_opacity = 1.0f;
     float mob_opacity = 0.15f;
-    if(
-        state == EDITOR_STATE_LAYOUT ||
-        state == EDITOR_STATE_ASB ||
-        state == EDITOR_STATE_ASA
-    ) {
+    
+    switch(state) {
+    case EDITOR_STATE_LAYOUT: {
         textures_opacity = 0.5f;
         edges_opacity = 1.0f;
+        break;
         
-    } else if(state == EDITOR_STATE_MOBS) {
+    } case EDITOR_STATE_MOBS: {
         mob_opacity = 1.0f;
+        break;
         
-    } else if(state == EDITOR_STATE_MAIN || state == EDITOR_STATE_REVIEW) {
+    } case EDITOR_STATE_MAIN:
+    case EDITOR_STATE_REVIEW: {
         textures_opacity = 0.6f;
         edges_opacity = 0.5f;
         grid_opacity = 0.3f;
         mob_opacity = 0.75f;
+        break;
         
     }
-    if(state == EDITOR_STATE_ASA) {
-        selection_min_opacity = 0.0f;
-        selection_max_opacity = 0.0f;
-        textures_opacity = 1.0f;
     }
-    if(state == EDITOR_STATE_STT) {
-        textures_opacity = 1.0f;
-        edges_opacity = 0.8f;
-        grid_opacity = 0.0f;
-    }
+    
     if(sub_state == EDITOR_SUB_STATE_TEXTURE_VIEW) {
         textures_opacity = 1.0f;
         edges_opacity = 0.0f;
         grid_opacity = 0.0f;
         mob_opacity = 0.0f;
+    } else if(sub_state == EDITOR_SUB_STATE_OCTEE) {
+        quick_preview_timer.start();
+    }
+    
+    if(quick_preview_timer.time_left > 0) {
+        float t =
+            std::min(
+                quick_preview_timer.time_left,
+                quick_preview_timer.duration / 2.0f
+            );
+        selection_min_opacity =
+            interpolate_number(
+                t, 0.0f, quick_preview_timer.duration / 2.0f,
+                selection_min_opacity, 0.0f
+            );
+        selection_max_opacity =
+            interpolate_number(
+                t, 0.0f, quick_preview_timer.duration / 2.0f,
+                selection_max_opacity, 0.0f
+            );
+        textures_opacity =
+            interpolate_number(
+                t, 0.0f, quick_preview_timer.duration / 2.0f,
+                textures_opacity, 1.0f
+            );
+        edges_opacity =
+            interpolate_number(
+                t, 0.0f, quick_preview_timer.duration / 2.0f,
+                edges_opacity, 0.5f
+            );
+        grid_opacity =
+            interpolate_number(
+                t, 0.0f, quick_preview_timer.duration / 2.0f,
+                grid_opacity, 0.0f
+            );
+        mob_opacity =
+            interpolate_number(
+                t, 0.0f, quick_preview_timer.duration / 2.0f,
+                mob_opacity, 0.0f
+            );
     }
     
     float selection_opacity =
@@ -95,28 +152,26 @@ void area_editor::do_drawing() {
         (selection_max_opacity - selection_min_opacity) / 2.0;
         
     //Sectors.
-    size_t n_sectors = cur_area_data.sectors.size();
+    size_t n_sectors = game.cur_area_data.sectors.size();
     for(size_t s = 0; s < n_sectors; ++s) {
         sector* s_ptr;
         if(
             pre_move_area_data &&
             moving &&
             (
-                state == EDITOR_STATE_ASA ||
-                state == EDITOR_STATE_ASB ||
                 state == EDITOR_STATE_LAYOUT
             )
         ) {
             s_ptr = pre_move_area_data->sectors[s];
         } else {
-            s_ptr = cur_area_data.sectors[s];
+            s_ptr = game.cur_area_data.sectors[s];
         }
         
         bool view_heightmap = false;
         bool view_brightness = false;
         
         if(
-            area_editor_view_mode == VIEW_MODE_TEXTURES ||
+            game.options.area_editor_view_mode == VIEW_MODE_TEXTURES ||
             sub_state == EDITOR_SUB_STATE_TEXTURE_VIEW
         ) {
             draw_sector_texture(s_ptr, point(), 1.0, textures_opacity);
@@ -125,10 +180,10 @@ void area_editor::do_drawing() {
                 draw_sector_shadows(s_ptr, point(), 1.0);
             }
             
-        } else if(area_editor_view_mode == VIEW_MODE_HEIGHTMAP) {
+        } else if(game.options.area_editor_view_mode == VIEW_MODE_HEIGHTMAP) {
             view_heightmap = true;
             
-        } else if(area_editor_view_mode == VIEW_MODE_BRIGHTNESS) {
+        } else if(game.options.area_editor_view_mode == VIEW_MODE_BRIGHTNESS) {
             view_brightness = true;
             
         }
@@ -137,7 +192,10 @@ void area_editor::do_drawing() {
             selected_sectors.find(s_ptr) != selected_sectors.end();
         bool valid = true;
         
-        if(non_simples.find(s_ptr) != non_simples.end()) {
+        if(
+            game.cur_area_data.problems.non_simples.find(s_ptr) !=
+            game.cur_area_data.problems.non_simples.end()
+        ) {
             valid = false;
         }
         if(s_ptr == problem_sector_ptr) {
@@ -193,93 +251,32 @@ void area_editor::do_drawing() {
     }
     
     //Grid.
-    point cam_top_left_corner(0, 0);
-    point cam_bottom_right_corner(canvas_br.x, canvas_br.y);
-    al_transform_coordinates(
-        &screen_to_world_transform,
-        &cam_top_left_corner.x, &cam_top_left_corner.y
+    draw_grid(
+        game.options.area_editor_grid_interval,
+        al_map_rgba(64, 64, 64, grid_opacity * 255),
+        al_map_rgba(48, 48, 48, grid_opacity * 255)
     );
-    al_transform_coordinates(
-        &screen_to_world_transform,
-        &cam_bottom_right_corner.x, &cam_bottom_right_corner.y
-    );
-    
-    float x =
-        floor(cam_top_left_corner.x / area_editor_grid_interval) *
-        area_editor_grid_interval;
-    while(x < cam_bottom_right_corner.x + area_editor_grid_interval) {
-        ALLEGRO_COLOR c = al_map_rgba(48, 48, 48, grid_opacity * 255);
-        bool draw_line = true;
-        
-        if(fmod(x, area_editor_grid_interval * 2) == 0) {
-            c = al_map_rgba(64, 64, 64, grid_opacity * 255);
-            if((area_editor_grid_interval * 2) * cam_zoom <= 6) {
-                draw_line = false;
-            }
-        } else {
-            if(area_editor_grid_interval * cam_zoom <= 6) {
-                draw_line = false;
-            }
-        }
-        
-        if(draw_line) {
-            al_draw_line(
-                x, cam_top_left_corner.y,
-                x, cam_bottom_right_corner.y + area_editor_grid_interval,
-                c, 1.0 / cam_zoom
-            );
-        }
-        x += area_editor_grid_interval;
-    }
-    
-    float y =
-        floor(cam_top_left_corner.y / area_editor_grid_interval) *
-        area_editor_grid_interval;
-    while(y < cam_bottom_right_corner.y + area_editor_grid_interval) {
-        ALLEGRO_COLOR c = al_map_rgba(48, 48, 48, grid_opacity * 255);
-        bool draw_line = true;
-        
-        if(fmod(y, area_editor_grid_interval * 2) == 0) {
-            c = al_map_rgba(64, 64, 64, grid_opacity * 255);
-            if((area_editor_grid_interval * 2) * cam_zoom <= 6) {
-                draw_line = false;
-            }
-        } else {
-            if(area_editor_grid_interval * cam_zoom <= 6) {
-                draw_line = false;
-            }
-        }
-        
-        if(draw_line) {
-            al_draw_line(
-                cam_top_left_corner.x, y,
-                cam_bottom_right_corner.x + area_editor_grid_interval, y,
-                c, 1.0 / cam_zoom
-            );
-        }
-        y += area_editor_grid_interval;
-    }
     
     //0,0 marker.
     al_draw_line(
-        -(DEF_AREA_EDITOR_GRID_INTERVAL * 2), 0,
-        DEF_AREA_EDITOR_GRID_INTERVAL * 2, 0,
+        -(COMFY_DIST * 2), 0,
+        COMFY_DIST * 2, 0,
         al_map_rgba(192, 192, 224, grid_opacity * 255),
-        1.0 / cam_zoom
+        1.0f / game.cam.zoom
     );
     al_draw_line(
-        0, -(DEF_AREA_EDITOR_GRID_INTERVAL * 2), 0,
-        DEF_AREA_EDITOR_GRID_INTERVAL * 2,
+        0, -(COMFY_DIST * 2), 0,
+        COMFY_DIST * 2,
         al_map_rgba(192, 192, 224, grid_opacity * 255),
-        1.0 / cam_zoom
+        1.0f / game.cam.zoom
     );
     
     //Edges.
-    size_t n_edges = cur_area_data.edges.size();
+    size_t n_edges = game.cur_area_data.edges.size();
     for(size_t e = 0; e < n_edges; ++e) {
-        edge* e_ptr = cur_area_data.edges[e];
+        edge* e_ptr = game.cur_area_data.edges[e];
         
-        if(!is_edge_valid(e_ptr)) continue;
+        if(!e_ptr->is_valid()) continue;
         
         bool one_sided = true;
         bool same_z = false;
@@ -302,13 +299,18 @@ void area_editor::do_drawing() {
             valid = false;
         }
         
-        if(lone_edges.find(e_ptr) != lone_edges.end()) {
+        if(
+            game.cur_area_data.problems.lone_edges.find(e_ptr) !=
+            game.cur_area_data.problems.lone_edges.end()
+        ) {
             valid = false;
         }
         
         if(
-            non_simples.find(e_ptr->sectors[0]) != non_simples.end() ||
-            non_simples.find(e_ptr->sectors[1]) != non_simples.end()
+            game.cur_area_data.problems.non_simples.find(e_ptr->sectors[0]) !=
+            game.cur_area_data.problems.non_simples.end() ||
+            game.cur_area_data.problems.non_simples.find(e_ptr->sectors[1]) !=
+            game.cur_area_data.problems.non_simples.end()
         ) {
             valid = false;
         }
@@ -348,13 +350,13 @@ void area_editor::do_drawing() {
                 al_map_rgba(128, 128, 128, edges_opacity * 255) :
                 al_map_rgba(192, 192, 192, edges_opacity * 255)
             ),
-            (selected ? 3.0 : 2.0) / cam_zoom
+            (selected ? 3.0 : 2.0) / game.cam.zoom
         );
         
         if(
             state == EDITOR_STATE_LAYOUT &&
             moving &&
-            area_editor_show_edge_length
+            game.options.area_editor_show_edge_length
         ) {
             bool draw_dist = false;
             point other_point;
@@ -396,7 +398,7 @@ void area_editor::do_drawing() {
                     t_ptr->points[2]->x,
                     t_ptr->points[2]->y,
                     al_map_rgb(192, 0, 160),
-                    1.0 / cam_zoom
+                    1.0f / game.cam.zoom
                 );
             }
         }
@@ -450,18 +452,17 @@ void area_editor::do_drawing() {
     }
     
     //Vertexes.
-    if(state == EDITOR_STATE_LAYOUT || state == EDITOR_STATE_ASB) {
-        size_t n_vertexes = cur_area_data.vertexes.size();
+    if(state == EDITOR_STATE_LAYOUT) {
+        size_t n_vertexes = game.cur_area_data.vertexes.size();
         for(size_t v = 0; v < n_vertexes; ++v) {
-            vertex* v_ptr = cur_area_data.vertexes[v];
+            vertex* v_ptr = game.cur_area_data.vertexes[v];
             bool selected =
                 (selected_vertexes.find(v_ptr) != selected_vertexes.end());
             bool valid =
                 v_ptr != problem_vertex_ptr;
-            al_draw_filled_circle(
-                v_ptr->x,
-                v_ptr->y,
-                3.0 / cam_zoom,
+            draw_filled_diamond(
+                point(v_ptr->x, v_ptr->y),
+                3.0 / game.cam.zoom,
                 selected ?
                 al_map_rgba(
                     SELECTION_COLOR[0],
@@ -483,23 +484,39 @@ void area_editor::do_drawing() {
         }
     }
     
+    //Selection transformation widget.
+    if(
+        game.options.area_editor_sel_trans &&
+        selected_vertexes.size() >= 2 &&
+        (!moving || cur_transformation_widget.is_moving_handle())
+    ) {
+        cur_transformation_widget.draw(
+            &selection_center,
+            &selection_size,
+            &selection_angle,
+            1.0f / game.cam.zoom
+        );
+    }
+    
     //Mobs.
     if(state == EDITOR_STATE_MOBS) {
-        for(size_t m = 0; m < cur_area_data.mob_generators.size(); ++m) {
-            mob_gen* m_ptr = cur_area_data.mob_generators[m];
+        for(size_t m = 0; m < game.cur_area_data.mob_generators.size(); ++m) {
+            mob_gen* m_ptr = game.cur_area_data.mob_generators[m];
             mob_gen* m2_ptr = NULL;
             
             for(size_t l = 0; l < m_ptr->links.size(); ++l) {
                 m2_ptr = m_ptr->links[l];
+                if(!m_ptr->type) continue;
+                if(!m2_ptr->type) continue;
                 
                 al_draw_line(
                     m_ptr->pos.x, m_ptr->pos.y,
                     m2_ptr->pos.x, m2_ptr->pos.y,
                     al_map_rgb(160, 224, 64),
-                    MOB_LINK_THICKNESS / cam_zoom
+                    MOB_LINK_THICKNESS / game.cam.zoom
                 );
                 
-                if(cam_zoom >= 0.25) {
+                if(game.cam.zoom >= 0.25) {
                     float angle =
                         get_angle(m_ptr->pos, m2_ptr->pos);
                     point start = point(m_ptr->type->radius, 0);
@@ -514,7 +531,7 @@ void area_editor::do_drawing() {
                         start.y + (end.y - start.y) * 0.55
                     );
                     const float delta =
-                        (MOB_LINK_THICKNESS * 4) / cam_zoom;
+                        (MOB_LINK_THICKNESS * 4) / game.cam.zoom;
                         
                     al_draw_filled_triangle(
                         pivot.x + cos(angle) * delta,
@@ -530,20 +547,20 @@ void area_editor::do_drawing() {
         }
     }
     
-    for(size_t m = 0; m < cur_area_data.mob_generators.size(); ++m) {
-        mob_gen* m_ptr = cur_area_data.mob_generators[m];
+    for(size_t m = 0; m < game.cur_area_data.mob_generators.size(); ++m) {
+        mob_gen* m_ptr = game.cur_area_data.mob_generators[m];
         
         float radius = get_mob_gen_radius(m_ptr);
         ALLEGRO_COLOR c =
             change_alpha(m_ptr->category->editor_color, mob_opacity * 255);
         if(m_ptr == problem_mob_ptr) {
-            c = al_map_rgb(192, 32, 32);
+            c = al_map_rgb(255, 0, 0);
         }
         
         if(m_ptr->type && m_ptr->type->rectangular_dim.x != 0) {
             draw_rotated_rectangle(
                 m_ptr->pos, m_ptr->type->rectangular_dim,
-                m_ptr->angle, c, 1.0 / cam_zoom
+                m_ptr->angle, c, 1.0f / game.cam.zoom
             );
         }
         
@@ -590,20 +607,30 @@ void area_editor::do_drawing() {
                     selection_opacity * 255
                 )
             );
+            
+            if(
+                game.options.area_editor_show_territory &&
+                m_ptr->type->territory_radius > 0
+            ) {
+                al_draw_circle(
+                    m_ptr->pos.x, m_ptr->pos.y, m_ptr->type->territory_radius,
+                    al_map_rgb(240, 240, 192), 1.0f / game.cam.zoom
+                );
+            }
         }
         
     }
     
     //Paths.
     if(state == EDITOR_STATE_PATHS) {
-        for(size_t s = 0; s < cur_area_data.path_stops.size(); ++s) {
-            path_stop* s_ptr = cur_area_data.path_stops[s];
+        for(size_t s = 0; s < game.cur_area_data.path_stops.size(); ++s) {
+            path_stop* s_ptr = game.cur_area_data.path_stops[s];
             for(size_t l = 0; l < s_ptr->links.size(); l++) {
                 path_stop* s2_ptr = s_ptr->links[l].end_ptr;
                 bool one_way =
                     s_ptr->links[l].end_ptr->get_link(s_ptr) == INVALID;
                 bool selected =
-                    selected_path_links.find(make_pair(s_ptr, s2_ptr)) !=
+                    selected_path_links.find(std::make_pair(s_ptr, s2_ptr)) !=
                     selected_path_links.end();
                     
                 al_draw_line(
@@ -620,7 +647,7 @@ void area_editor::do_drawing() {
                         one_way ? al_map_rgb(192, 128, 224) :
                         al_map_rgb(0, 80, 224)
                     ),
-                    PATH_LINK_THICKNESS / cam_zoom
+                    PATH_LINK_THICKNESS / game.cam.zoom
                 );
                 
                 if(debug_path_nrs && (one_way || s < s_ptr->links[l].end_nr)) {
@@ -645,7 +672,7 @@ void area_editor::do_drawing() {
                     float angle =
                         get_angle(s_ptr->pos, s2_ptr->pos);
                     const float delta =
-                        (PATH_LINK_THICKNESS * 4) / cam_zoom;
+                        (PATH_LINK_THICKNESS * 4) / game.cam.zoom;
                         
                     al_draw_filled_triangle(
                         mid_x + cos(angle) * delta,
@@ -660,8 +687,8 @@ void area_editor::do_drawing() {
             }
         }
         
-        for(size_t s = 0; s < cur_area_data.path_stops.size(); ++s) {
-            path_stop* s_ptr = cur_area_data.path_stops[s];
+        for(size_t s = 0; s < game.cur_area_data.path_stops.size(); ++s) {
+            path_stop* s_ptr = game.cur_area_data.path_stops[s];
             al_draw_filled_circle(
                 s_ptr->pos.x, s_ptr->pos.y,
                 PATH_STOP_RADIUS,
@@ -693,9 +720,9 @@ void area_editor::do_drawing() {
         if(show_closest_stop) {
             path_stop* closest = NULL;
             dist closest_dist;
-            for(size_t s = 0; s < cur_area_data.path_stops.size(); ++s) {
-                path_stop* s_ptr = cur_area_data.path_stops[s];
-                dist d(mouse_cursor_w, s_ptr->pos);
+            for(size_t s = 0; s < game.cur_area_data.path_stops.size(); ++s) {
+                path_stop* s_ptr = game.cur_area_data.path_stops[s];
+                dist d(game.mouse_cursor_w, s_ptr->pos);
                 
                 if(!closest || d < closest_dist) {
                     closest = s_ptr;
@@ -705,9 +732,9 @@ void area_editor::do_drawing() {
             
             if(closest) {
                 al_draw_line(
-                    mouse_cursor_w.x, mouse_cursor_w.y,
+                    game.mouse_cursor_w.x, game.mouse_cursor_w.y,
                     closest->pos.x, closest->pos.y,
-                    al_map_rgb(192, 128, 32), 2.0 / cam_zoom
+                    al_map_rgb(192, 128, 32), 2.0 / game.cam.zoom
                 );
             }
         }
@@ -720,7 +747,7 @@ void area_editor::do_drawing() {
                     path_preview_checkpoints[0].y,
                     path_preview_checkpoints[1].x,
                     path_preview_checkpoints[1].y,
-                    al_map_rgb(240, 128, 128), 3.0 / cam_zoom
+                    al_map_rgb(240, 128, 128), 3.0 / game.cam.zoom
                 );
             } else {
                 al_draw_line(
@@ -728,7 +755,7 @@ void area_editor::do_drawing() {
                     path_preview_checkpoints[0].y,
                     path_preview[0]->pos.x,
                     path_preview[0]->pos.y,
-                    al_map_rgb(240, 128, 128), 3.0 / cam_zoom
+                    al_map_rgb(240, 128, 128), 3.0 / game.cam.zoom
                 );
                 for(size_t s = 0; s < path_preview.size() - 1; ++s) {
                     al_draw_line(
@@ -736,7 +763,7 @@ void area_editor::do_drawing() {
                         path_preview[s]->pos.y,
                         path_preview[s + 1]->pos.x,
                         path_preview[s + 1]->pos.y,
-                        al_map_rgb(240, 128, 128), 3.0 / cam_zoom
+                        al_map_rgb(240, 128, 128), 3.0 / game.cam.zoom
                     );
                 }
                 
@@ -745,7 +772,7 @@ void area_editor::do_drawing() {
                     path_preview.back()->pos.y,
                     path_preview_checkpoints[1].x,
                     path_preview_checkpoints[1].y,
-                    al_map_rgb(240, 128, 128), 3.0 / cam_zoom
+                    al_map_rgb(240, 128, 128), 3.0 / game.cam.zoom
                 );
             }
             
@@ -755,21 +782,21 @@ void area_editor::do_drawing() {
                 
                 al_draw_filled_rectangle(
                     path_preview_checkpoints[c].x -
-                    (PATH_PREVIEW_CHECKPOINT_RADIUS / cam_zoom),
+                    (PATH_PREVIEW_CHECKPOINT_RADIUS / game.cam.zoom),
                     path_preview_checkpoints[c].y -
-                    (PATH_PREVIEW_CHECKPOINT_RADIUS / cam_zoom),
+                    (PATH_PREVIEW_CHECKPOINT_RADIUS / game.cam.zoom),
                     path_preview_checkpoints[c].x +
-                    (PATH_PREVIEW_CHECKPOINT_RADIUS / cam_zoom),
+                    (PATH_PREVIEW_CHECKPOINT_RADIUS / game.cam.zoom),
                     path_preview_checkpoints[c].y +
-                    (PATH_PREVIEW_CHECKPOINT_RADIUS / cam_zoom),
+                    (PATH_PREVIEW_CHECKPOINT_RADIUS / game.cam.zoom),
                     al_map_rgb(240, 224, 160)
                 );
                 draw_scaled_text(
-                    font_builtin, al_map_rgb(0, 64, 64),
+                    game.fonts.builtin, al_map_rgb(0, 64, 64),
                     path_preview_checkpoints[c],
                     point(
-                        POINT_LETTER_TEXT_SCALE / cam_zoom,
-                        POINT_LETTER_TEXT_SCALE / cam_zoom
+                        POINT_LETTER_TEXT_SCALE / game.cam.zoom,
+                        POINT_LETTER_TEXT_SCALE / game.cam.zoom
                     ),
                     ALLEGRO_ALIGN_CENTER, 1,
                     letter
@@ -783,9 +810,9 @@ void area_editor::do_drawing() {
         state == EDITOR_STATE_DETAILS ||
         (sub_state == EDITOR_SUB_STATE_TEXTURE_VIEW && show_shadows)
     ) {
-        for(size_t s = 0; s < cur_area_data.tree_shadows.size(); ++s) {
+        for(size_t s = 0; s < game.cur_area_data.tree_shadows.size(); ++s) {
         
-            tree_shadow* s_ptr = cur_area_data.tree_shadows[s];
+            tree_shadow* s_ptr = game.cur_area_data.tree_shadows[s];
             if(
                 sub_state != EDITOR_SUB_STATE_TEXTURE_VIEW &&
                 s_ptr == selected_shadow
@@ -832,13 +859,18 @@ void area_editor::do_drawing() {
                             al_map_rgb(224, 224, 64) :
                             al_map_rgb(128, 128, 64)
                         ),
-                        2.0 / cam_zoom
+                        2.0 / game.cam.zoom
                     );
                 }
             }
         }
         if(selected_shadow) {
-            selected_shadow_transformation.draw_handles();
+            cur_transformation_widget.draw(
+                &selected_shadow->center,
+                &selected_shadow->size,
+                &selected_shadow->angle,
+                1.0f / game.cam.zoom
+            );
         }
     }
     
@@ -849,21 +881,21 @@ void area_editor::do_drawing() {
             
             al_draw_filled_rectangle(
                 cross_section_checkpoints[p].x -
-                (CROSS_SECTION_POINT_RADIUS / cam_zoom),
+                (CROSS_SECTION_POINT_RADIUS / game.cam.zoom),
                 cross_section_checkpoints[p].y -
-                (CROSS_SECTION_POINT_RADIUS / cam_zoom),
+                (CROSS_SECTION_POINT_RADIUS / game.cam.zoom),
                 cross_section_checkpoints[p].x +
-                (CROSS_SECTION_POINT_RADIUS / cam_zoom),
+                (CROSS_SECTION_POINT_RADIUS / game.cam.zoom),
                 cross_section_checkpoints[p].y +
-                (CROSS_SECTION_POINT_RADIUS / cam_zoom),
+                (CROSS_SECTION_POINT_RADIUS / game.cam.zoom),
                 al_map_rgb(255, 255, 32)
             );
             draw_scaled_text(
-                font_builtin, al_map_rgb(0, 64, 64),
+                game.fonts.builtin, al_map_rgb(0, 64, 64),
                 cross_section_checkpoints[p],
                 point(
-                    POINT_LETTER_TEXT_SCALE / cam_zoom,
-                    POINT_LETTER_TEXT_SCALE / cam_zoom
+                    POINT_LETTER_TEXT_SCALE / game.cam.zoom,
+                    POINT_LETTER_TEXT_SCALE / game.cam.zoom
                 ),
                 ALLEGRO_ALIGN_CENTER, 1,
                 letter
@@ -874,7 +906,7 @@ void area_editor::do_drawing() {
             cross_section_checkpoints[0].y,
             cross_section_checkpoints[1].x,
             cross_section_checkpoints[1].y,
-            al_map_rgb(255, 0, 0), 3.0 / cam_zoom
+            al_map_rgb(255, 0, 0), 3.0 / game.cam.zoom
         );
     }
     
@@ -885,14 +917,19 @@ void area_editor::do_drawing() {
     ) {
         draw_bitmap(
             reference_bitmap,
-            reference_transformation.get_center(),
-            reference_transformation.get_size(),
+            reference_center,
+            reference_size,
             0,
             map_alpha(reference_alpha)
         );
         
         if(state == EDITOR_STATE_TOOLS) {
-            reference_transformation.draw_handles();
+            cur_transformation_widget.draw(
+                &reference_center,
+                &reference_size,
+                NULL,
+                1.0f / game.cam.zoom
+            );
         }
     }
     
@@ -905,7 +942,7 @@ void area_editor::do_drawing() {
                 drawing_nodes[n].snapped_spot.x,
                 drawing_nodes[n].snapped_spot.y,
                 al_map_rgb(128, 255, 128),
-                3.0 / cam_zoom
+                3.0 / game.cam.zoom
             );
         }
         if(!drawing_nodes.empty()) {
@@ -916,7 +953,7 @@ void area_editor::do_drawing() {
                     al_map_rgb(255, 0, 0),
                     al_map_rgb(64, 255, 64)
                 );
-            point hotspot = snap_point(mouse_cursor_w);
+            point hotspot = snap_point(game.mouse_cursor_w);
             
             al_draw_line(
                 drawing_nodes.back().snapped_spot.x,
@@ -924,10 +961,10 @@ void area_editor::do_drawing() {
                 hotspot.x,
                 hotspot.y,
                 new_line_color,
-                3.0 / cam_zoom
+                3.0 / game.cam.zoom
             );
             
-            if(area_editor_show_edge_length) {
+            if(game.options.area_editor_show_edge_length) {
                 draw_line_dist(hotspot, drawing_nodes.back().snapped_spot);
             }
         }
@@ -935,7 +972,8 @@ void area_editor::do_drawing() {
     
     //New circular sector drawing.
     if(sub_state == EDITOR_SUB_STATE_CIRCLE_SECTOR) {
-        if(new_circle_sector_step == 1) {
+        switch(new_circle_sector_step) {
+        case 1: {
             float circle_radius =
                 dist(
                     new_circle_sector_center, new_circle_sector_anchor
@@ -945,10 +983,11 @@ void area_editor::do_drawing() {
                 new_circle_sector_center.y,
                 circle_radius,
                 al_map_rgb(64, 255, 64),
-                3.0 / cam_zoom
+                3.0 / game.cam.zoom
             );
+            break;
             
-        } else if(new_circle_sector_step == 2) {
+        } case 2: {
             for(size_t p = 0; p < new_circle_sector_points.size(); ++p) {
                 point cur_point = new_circle_sector_points[p];
                 point next_point =
@@ -961,7 +1000,7 @@ void area_editor::do_drawing() {
                 al_draw_line(
                     cur_point.x, cur_point.y,
                     next_point.x, next_point.y,
-                    color, 3.0 / cam_zoom
+                    color, 3.0 / game.cam.zoom
                 );
             }
             
@@ -969,24 +1008,25 @@ void area_editor::do_drawing() {
                 al_draw_filled_circle(
                     new_circle_sector_points[p].x,
                     new_circle_sector_points[p].y,
-                    3.0 / cam_zoom, al_map_rgb(192, 255, 192)
+                    3.0 / game.cam.zoom, al_map_rgb(192, 255, 192)
                 );
             }
-            
+            break;
+        }
         }
     }
     
     //Path drawing.
     if(sub_state == EDITOR_SUB_STATE_PATH_DRAWING) {
         if(path_drawing_stop_1) {
-            point hotspot = snap_point(mouse_cursor_w);
+            point hotspot = snap_point(game.mouse_cursor_w);
             al_draw_line(
                 path_drawing_stop_1->pos.x,
                 path_drawing_stop_1->pos.y,
                 hotspot.x,
                 hotspot.y,
                 al_map_rgb(64, 255, 64),
-                3.0 / cam_zoom
+                3.0 / game.cam.zoom
             );
         }
     }
@@ -1003,7 +1043,7 @@ void area_editor::do_drawing() {
                 SELECTION_COLOR[1],
                 SELECTION_COLOR[2]
             ),
-            2.0 / cam_zoom
+            2.0 / game.cam.zoom
             
         );
     }
@@ -1018,19 +1058,25 @@ void area_editor::do_drawing() {
         sub_state == EDITOR_SUB_STATE_PATH_DRAWING ||
         sub_state == EDITOR_SUB_STATE_NEW_SHADOW
     ) {
-        point marker = mouse_cursor_w;
+        point marker = game.mouse_cursor_w;
         
         if(sub_state != EDITOR_SUB_STATE_ADD_MOB_LINK) {
             marker = snap_point(marker);
         }
         
         al_draw_line(
-            marker.x - 16, marker.y, marker.x + 16, marker.y,
-            al_map_rgb(255, 255, 255), 1.0 / cam_zoom
+            marker.x - 10 / game.cam.zoom,
+            marker.y,
+            marker.x + 10 / game.cam.zoom,
+            marker.y,
+            al_map_rgb(255, 255, 255), 2.0 / game.cam.zoom
         );
         al_draw_line(
-            marker.x, marker.y - 16, marker.x, marker.y + 16,
-            al_map_rgb(255, 255, 255), 1.0 / cam_zoom
+            marker.x,
+            marker.y - 10 / game.cam.zoom,
+            marker.x,
+            marker.y + 10 / game.cam.zoom,
+            al_map_rgb(255, 255, 255), 2.0 / game.cam.zoom
         );
     }
     
@@ -1038,19 +1084,25 @@ void area_editor::do_drawing() {
     if(
         sub_state == EDITOR_SUB_STATE_DEL_MOB_LINK
     ) {
-        point marker = mouse_cursor_w;
+        point marker = game.mouse_cursor_w;
         
         al_draw_line(
-            marker.x - 16, marker.y - 16, marker.x + 16, marker.y + 16,
-            al_map_rgb(255, 255, 255), 1.0 / cam_zoom
+            marker.x - 10 / game.cam.zoom,
+            marker.y - 10 / game.cam.zoom,
+            marker.x + 10 / game.cam.zoom,
+            marker.y + 10 / game.cam.zoom,
+            al_map_rgb(255, 255, 255), 2.0 / game.cam.zoom
         );
         al_draw_line(
-            marker.x - 16, marker.y + 16, marker.x + 16, marker.y - 16,
-            al_map_rgb(255, 255, 255), 1.0 / cam_zoom
+            marker.x - 10 / game.cam.zoom,
+            marker.y + 10 / game.cam.zoom,
+            marker.x + 10 / game.cam.zoom,
+            marker.y - 10 / game.cam.zoom,
+            al_map_rgb(255, 255, 255), 2.0 / game.cam.zoom
         );
     }
     
-    al_use_transform(&identity_transform);
+    al_use_transform(&game.identity_transform);
     
     //Cross-section graph.
     if(state == EDITOR_STATE_REVIEW && show_cross_section) {
@@ -1094,8 +1146,8 @@ void area_editor::do_drawing() {
             }
         };
         vector<split_info> splits;
-        for(size_t e = 0; e < cur_area_data.edges.size(); ++e) {
-            edge* e_ptr = cur_area_data.edges[e];
+        for(size_t e = 0; e < game.cur_area_data.edges.size(); ++e) {
+            edge* e_ptr = game.cur_area_data.edges[e];
             float ur = 0;
             float ul = 0;
             if(
@@ -1141,7 +1193,9 @@ void area_editor::do_drawing() {
             
             for(size_t s = 1; s < splits.size(); ++s) {
                 if(splits[s].sector_ptrs[0] != splits[s - 1].sector_ptrs[1]) {
-                    swap(splits[s].sector_ptrs[0], splits[s].sector_ptrs[1]);
+                    std::swap(
+                        splits[s].sector_ptrs[0], splits[s].sector_ptrs[1]
+                    );
                 }
             }
             
@@ -1188,9 +1242,9 @@ void area_editor::do_drawing() {
             
             if(central_sector) {
                 float pikmin_silhouette_w =
-                    standard_pikmin_radius * 2.0 * proportion;
+                    game.config.standard_pikmin_radius * 2.0 * proportion;
                 float pikmin_silhouette_h =
-                    standard_pikmin_height * proportion;
+                    game.config.standard_pikmin_height * proportion;
                 float pikmin_silhouette_pivot_x =
                     (
                         cross_section_window_start.x +
@@ -1200,11 +1254,11 @@ void area_editor::do_drawing() {
                     cross_section_window_end.y - 8 -
                     ((central_sector->z - lowest_z) * proportion);
                 al_draw_tinted_scaled_bitmap(
-                    bmp_pikmin_silhouette,
+                    game.sys_assets.bmp_pikmin_silhouette,
                     al_map_rgba(255, 255, 255, 128),
                     0, 0,
-                    al_get_bitmap_width(bmp_pikmin_silhouette),
-                    al_get_bitmap_height(bmp_pikmin_silhouette),
+                    al_get_bitmap_width(game.sys_assets.bmp_pikmin_silhouette),
+                    al_get_bitmap_height(game.sys_assets.bmp_pikmin_silhouette),
                     pikmin_silhouette_pivot_x - pikmin_silhouette_w / 2.0,
                     pikmin_silhouette_pivot_y - pikmin_silhouette_h,
                     pikmin_silhouette_w, pikmin_silhouette_h,
@@ -1229,7 +1283,7 @@ void area_editor::do_drawing() {
                     );
                     
                     draw_scaled_text(
-                        font_builtin, al_map_rgb(255, 255, 255),
+                        game.fonts.builtin, al_map_rgb(255, 255, 255),
                         point(
                             (cross_section_z_window_start.x + 8),
                             line_y
@@ -1243,7 +1297,7 @@ void area_editor::do_drawing() {
         } else {
         
             draw_scaled_text(
-                font_builtin, al_map_rgb(255, 255, 255),
+                game.fonts.builtin, al_map_rgb(255, 255, 255),
                 point(
                     (
                         cross_section_window_start.x +
@@ -1263,7 +1317,7 @@ void area_editor::do_drawing() {
         float cursor_segment_ratio = 0;
         get_closest_point_in_line(
             cross_section_checkpoints[0], cross_section_checkpoints[1],
-            point(mouse_cursor_w.x, mouse_cursor_w.y),
+            point(game.mouse_cursor_w.x, game.mouse_cursor_w.y),
             &cursor_segment_ratio
         );
         if(cursor_segment_ratio >= 0 && cursor_segment_ratio <= 1) {
@@ -1295,23 +1349,24 @@ void area_editor::do_drawing() {
         );
     }
     
+    //Finish up.
     al_reset_clipping_rectangle();
-    al_use_transform(&identity_transform);
-    
-    draw_unsaved_changes_warning();
-    
-    fade_mgr.draw();
-    
-    al_flip_display();
+    al_use_transform(&game.identity_transform);
 }
 
 
 /* ----------------------------------------------------------------------------
  * Draws a sector on the cross-section view.
- * *_ratio:    Where the sector starts/ends on the graph ([0, 1]).
- * proportion: Ratio of how much to resize the heights.
- * lowest_z:   What z coordinate represents the bottom of the graph.
- * sector_ptr: Pointer to the sector to draw.
+ * start_ratio:
+ *   Where the sector starts on the graph ([0, 1]).
+ * end_ratio:
+ *   Where the sector end on the graph ([0, 1]).
+ * proportion:
+ *   Ratio of how much to resize the heights.
+ * lowest_z:
+ *   What z coordinate represents the bottom of the graph.
+ * sector_ptr:
+ *   Pointer to the sector to draw.
  */
 void area_editor::draw_cross_section_sector(
     const float start_ratio, const float end_ratio, const float proportion,
@@ -1355,10 +1410,14 @@ void area_editor::draw_cross_section_sector(
 
 /* ----------------------------------------------------------------------------
  * Draws debug text, used to identify edges, sectors, or vertexes.
- * color: Text color.
- * where: Where to draw, in world coordinates.
- * text:  Text to show.
- * dots:  How many dots to draw above the text. 0, 1, or 2.
+ * color:
+ *   Text color.
+ * where:
+ *   Where to draw, in world coordinates.
+ * text:
+ *   Text to show.
+ * dots:
+ *   How many dots to draw above the text. 0, 1, or 2.
  */
 void area_editor::draw_debug_text(
     const ALLEGRO_COLOR color, const point &where, const string &text,
@@ -1367,12 +1426,12 @@ void area_editor::draw_debug_text(
     int dw = 0;
     int dh = 0;
     al_get_text_dimensions(
-        font_builtin, text.c_str(),
+        game.fonts.builtin, text.c_str(),
         NULL, NULL, &dw, &dh
     );
     
-    float bbox_w = (dw * DEBUG_TEXT_SCALE) / cam_zoom;
-    float bbox_h = (dh * DEBUG_TEXT_SCALE) / cam_zoom;
+    float bbox_w = (dw * DEBUG_TEXT_SCALE) / game.cam.zoom;
+    float bbox_h = (dh * DEBUG_TEXT_SCALE) / game.cam.zoom;
     
     al_draw_filled_rectangle(
         where.x - bbox_w * 0.5, where.y - bbox_h * 0.5,
@@ -1381,11 +1440,11 @@ void area_editor::draw_debug_text(
     );
     
     draw_scaled_text(
-        font_builtin, color,
+        game.fonts.builtin, color,
         where,
         point(
-            DEBUG_TEXT_SCALE / cam_zoom,
-            DEBUG_TEXT_SCALE / cam_zoom
+            DEBUG_TEXT_SCALE / game.cam.zoom,
+            DEBUG_TEXT_SCALE / game.cam.zoom
         ),
         ALLEGRO_ALIGN_CENTER, 1,
         text
@@ -1393,34 +1452,34 @@ void area_editor::draw_debug_text(
     
     if(dots > 0) {
         al_draw_filled_rectangle(
-            where.x - 3.0 / cam_zoom,
-            where.y + bbox_h * 0.5,
-            where.x + 3.0 / cam_zoom,
-            where.y + bbox_h * 0.5 + 3.0 / cam_zoom,
+            where.x - 3.0f / game.cam.zoom,
+            where.y + bbox_h * 0.5f,
+            where.x + 3.0f / game.cam.zoom,
+            where.y + bbox_h * 0.5f + 3.0f / game.cam.zoom,
             al_map_rgba(0, 0, 0, 128)
         );
         
         if(dots == 1) {
             al_draw_filled_rectangle(
-                where.x - 1.0 / cam_zoom,
-                where.y + bbox_h * 0.5 + 1.0 / cam_zoom,
-                where.x + 1.0 / cam_zoom,
-                where.y + bbox_h * 0.5 + 3.0 / cam_zoom,
+                where.x - 1.0f / game.cam.zoom,
+                where.y + bbox_h * 0.5f + 1.0f / game.cam.zoom,
+                where.x + 1.0f / game.cam.zoom,
+                where.y + bbox_h * 0.5f + 3.0f / game.cam.zoom,
                 color
             );
         } else {
             al_draw_filled_rectangle(
-                where.x - 3.0 / cam_zoom,
-                where.y + bbox_h * 0.5 + 1.0 / cam_zoom,
-                where.x - 1.0 / cam_zoom,
-                where.y + bbox_h * 0.5 + 3.0 / cam_zoom,
+                where.x - 3.0f / game.cam.zoom,
+                where.y + bbox_h * 0.5f + 1.0f / game.cam.zoom,
+                where.x - 1.0f / game.cam.zoom,
+                where.y + bbox_h * 0.5f + 3.0f / game.cam.zoom,
                 color
             );
             al_draw_filled_rectangle(
-                where.x + 1.0 / cam_zoom,
-                where.y + bbox_h * 0.5 + 1.0 / cam_zoom,
-                where.x + 3.0 / cam_zoom,
-                where.y + bbox_h * 0.5 + 3.0 / cam_zoom,
+                where.x + 1.0f / game.cam.zoom,
+                where.y + bbox_h * 0.5f + 1.0f / game.cam.zoom,
+                where.x + 3.0f / game.cam.zoom,
+                where.y + bbox_h * 0.5f + 3.0f / game.cam.zoom,
                 color
             );
         }
@@ -1429,8 +1488,12 @@ void area_editor::draw_debug_text(
 
 
 /* ----------------------------------------------------------------------------
- * Draws a number signifying the distance between two points next to the
- * main one.
+ * Draws a number signifying the distance between two points.
+ * The number is drawn next to the main point.
+ * focus:
+ *   The main point.
+ * other:
+ *   The point to measure against.
  */
 void area_editor::draw_line_dist(const point &focus, const point &other) {
     float d = dist(other, focus).to_float();

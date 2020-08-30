@@ -12,15 +12,15 @@
 #define INIT_INCLUDED
 
 #include "animation.h"
-#include "data_file.h"
+#include "utils/data_file.h"
+
 
 void init_allegro();
-void init_asset_file_names();
 void init_controls();
+void init_dear_imgui();
 void init_error_bitmap();
 void init_essentials();
 void init_event_things(ALLEGRO_TIMER* &timer, ALLEGRO_EVENT_QUEUE* &queue);
-void init_game_states();
 void init_hud_items();
 void init_misc();
 void init_mob_actions();
@@ -33,7 +33,6 @@ void init_single_animation(
 
 void destroy_allegro();
 void destroy_event_things(ALLEGRO_TIMER* &timer, ALLEGRO_EVENT_QUEUE* &queue);
-void destroy_game_states();
 void destroy_misc();
 void destroy_mob_categories();
 

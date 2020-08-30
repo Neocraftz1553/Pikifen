@@ -14,14 +14,23 @@
 
 #include "../drawing.h"
 #include "../functions.h"
+#include "../game.h"
 #include "../utils/geometry_utils.h"
 #include "../utils/string_utils.h"
-#include "../vars.h"
 
-using namespace std;
+
+using std::size_t;
+using std::string;
+
 
 /* ----------------------------------------------------------------------------
  * Creates an Onion mob.
+ * pos:
+ *   Starting coordinates.
+ * type:
+ *   Onion type this mob belongs to.
+ * angle:
+ *   Starting angle.
  */
 onion::onion(const point &pos, onion_type* type, const float angle) :
     mob(pos, type, angle),
@@ -60,7 +69,12 @@ onion::onion(const point &pos, onion_type* type, const float angle) :
  */
 void onion::call_pikmin() {
 
-    if(pikmin_list.size() >= max_pikmin_in_field) return;
+    if(
+        game.states.gameplay_st->mobs.pikmin_list.size() >=
+        game.config.max_pikmin_in_field
+    ) {
+        return;
+    }
     
     for(size_t m = 0; m < N_MATURITIES; ++m) {
         //Let's check the maturities in reverse order.
@@ -70,7 +84,7 @@ void onion::call_pikmin() {
         
         pikmin_inside[cur_m]--;
         create_mob(
-            mob_categories.get(MOB_CATEGORY_PIKMIN),
+            game.mob_categories.get(MOB_CATEGORY_PIKMIN),
             pos, oni_type->pik_type, 0,
             "maturity=" + i2s(cur_m)
         );
@@ -81,15 +95,41 @@ void onion::call_pikmin() {
 
 
 /* ----------------------------------------------------------------------------
- * Reads the provided script variables, if any, and does stuff with them.
+ * Draws an Onion.
  */
-void onion::read_script_vars(const string &vars) {
-    mob::read_script_vars(vars);
-    vector<string> pikmin_inside_vars =
-        split(get_var_value(vars, "pikmin_inside", ""));
+void onion::draw_mob() {
+    sprite* s_ptr = anim.get_cur_sprite();
+    
+    if(!s_ptr) return;
+    
+    bitmap_effect_info eff;
+    get_sprite_bitmap_effects(s_ptr, &eff, true, true);
+    
+    eff.tint_color.a *= (seethrough / 255.0f);
+    
+    draw_bitmap_with_effects(s_ptr->bitmap, eff);
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Reads the provided script variables, if any, and does stuff with them.
+ * svr:
+ *   Script var reader to use.
+ */
+void onion::read_script_vars(const script_var_reader &svr) {
+    mob::read_script_vars(svr);
+    
+    string pikmin_inside_var;
+    
+    if(svr.get("pikmin_inside", pikmin_inside_var)) {
+        vector<string> pikmin_inside_vars = split(pikmin_inside_var);
         
-    for(size_t m = 0; m < pikmin_inside_vars.size() && m < N_MATURITIES; ++m) {
-        pikmin_inside[m] = s2i(pikmin_inside_vars[m]);
+        for(
+            size_t m = 0; m < pikmin_inside_vars.size() && m < N_MATURITIES;
+            ++m
+        ) {
+            pikmin_inside[m] = s2i(pikmin_inside_vars[m]);
+        }
     }
 }
 
@@ -113,9 +153,9 @@ void onion::spew() {
     if(spew_queue == 0) return;
     spew_queue--;
     
-    unsigned total_after = pikmin_list.size() + 1;
+    unsigned total_after = game.states.gameplay_st->mobs.pikmin_list.size() + 1;
     
-    if(total_after > max_pikmin_in_field) {
+    if(total_after > game.config.max_pikmin_in_field) {
         pikmin_inside[0]++;
         return;
     }
@@ -143,8 +183,13 @@ void onion::stow_pikmin() {
     pikmin* pik_to_stow = NULL;
     size_t maturity = 0;
     for(; maturity < N_MATURITIES; ++maturity) {
-        for(size_t p = 0; p < cur_leader_ptr->group->members.size(); ++p) {
-            mob* mob_ptr = cur_leader_ptr->group->members[p];
+        for(
+            size_t p = 0;
+            p < game.states.gameplay_st->cur_leader_ptr->group->members.size();
+            ++p
+        ) {
+            mob* mob_ptr =
+                game.states.gameplay_st->cur_leader_ptr->group->members[p];
             if(mob_ptr->type->category->id != MOB_CATEGORY_PIKMIN) {
                 continue;
             }
@@ -170,10 +215,12 @@ void onion::stow_pikmin() {
 
 /* ----------------------------------------------------------------------------
  * Ticks some logic specific to Onions.
+ * delta_t:
+ *   How many seconds to tick by.
  */
-void onion::tick_class_specifics() {
-    for(size_t o = 0; o < onions.size(); ++o) {
-        onion* o_ptr = onions[o];
+void onion::tick_class_specifics(const float delta_t) {
+    for(size_t o = 0; o < game.states.gameplay_st->mobs.onions.size(); ++o) {
+        onion* o_ptr = game.states.gameplay_st->mobs.onions[o];
         
         if(o_ptr->spew_queue != 0) {
         
@@ -186,8 +233,9 @@ void onion::tick_class_specifics() {
         
         if(
             bbox_check(
-                cur_leader_ptr->pos, o_ptr->pos,
-                cur_leader_ptr->type->radius + o_ptr->type->radius * 3
+                game.states.gameplay_st->cur_leader_ptr->pos, o_ptr->pos,
+                game.states.gameplay_st->cur_leader_ptr->type->radius +
+                o_ptr->type->radius * 3
             )
         ) {
             final_alpha = ONION_SEETHROUGH_ALPHA;
@@ -195,8 +243,9 @@ void onion::tick_class_specifics() {
         
         if(
             bbox_check(
-                leader_cursor_w, o_ptr->pos,
-                cur_leader_ptr->type->radius + o_ptr->type->radius * 3
+                game.states.gameplay_st->leader_cursor_w, o_ptr->pos,
+                game.states.gameplay_st->cur_leader_ptr->type->radius +
+                o_ptr->type->radius * 3
             )
         ) {
             final_alpha = ONION_SEETHROUGH_ALPHA;
@@ -205,45 +254,17 @@ void onion::tick_class_specifics() {
         if(o_ptr->seethrough != final_alpha) {
             if(final_alpha < o_ptr->seethrough) {
                 o_ptr->seethrough =
-                    max(
+                    std::max(
                         (double) final_alpha,
-                        o_ptr->seethrough - ONION_FADE_SPEED * delta_t
+                        (double) o_ptr->seethrough - ONION_FADE_SPEED * delta_t
                     );
             } else {
                 o_ptr->seethrough =
-                    min(
+                    std::min(
                         (double) final_alpha,
-                        o_ptr->seethrough + ONION_FADE_SPEED * delta_t
+                        (double) o_ptr->seethrough + ONION_FADE_SPEED * delta_t
                     );
             }
         }
     }
-}
-
-
-/* ----------------------------------------------------------------------------
- * Draws an Onion.
- */
-void onion::draw_mob(bitmap_effect_manager* effect_manager) {
-    sprite* s_ptr = anim.get_cur_sprite();
-    
-    if(!s_ptr) return;
-    
-    point draw_pos = get_sprite_center(s_ptr);
-    point draw_size = get_sprite_dimensions(s_ptr);
-    
-    bitmap_effect_manager effects;
-    add_sector_brightness_bitmap_effect(&effects);
-    
-    bitmap_effect seethrough_effect;
-    bitmap_effect_props seethrough_effect_props;
-    seethrough_effect_props.tint_color = al_map_rgba(255, 255, 255, seethrough);
-    seethrough_effect.add_keyframe(0, seethrough_effect_props);
-    effects.add_effect(seethrough_effect);
-    
-    draw_bitmap_with_effects(
-        s_ptr->bitmap,
-        draw_pos, draw_size,
-        angle + s_ptr->angle, &effects
-    );
 }

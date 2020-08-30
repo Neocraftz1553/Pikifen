@@ -12,7 +12,7 @@
 
 #include "custom_category.h"
 
-#include "../vars.h"
+#include "../game.h"
 
 
 /* ----------------------------------------------------------------------------
@@ -21,29 +21,37 @@
 custom_category::custom_category() :
     mob_category(
         MOB_CATEGORY_CUSTOM, "Custom", "Custom",
-        CUSTOM_MOB_FOLDER_PATH, al_map_rgb(224, 128, 224)
+        "Custom", al_map_rgb(178, 73, 204)
     ) {
     
 }
 
 
 /* ----------------------------------------------------------------------------
- * Returns all custom types by name.
+ * Clears the list of registered types of custom mob.
  */
-void custom_category::get_type_names(vector<string> &list) {
-    for(auto t = custom_mob_types.begin(); t != custom_mob_types.end(); ++t) {
-        list.push_back(t->first);
+void custom_category::clear_types() {
+    for(auto &t : game.mob_types.custom) {
+        delete t.second;
     }
+    game.mob_types.custom.clear();
 }
 
 
 /* ----------------------------------------------------------------------------
- * Returns a custom type given its name, or NULL on error.
+ * Creates a custom mob and adds it to the list of custom mobs.
+ * pos:
+ *   Starting coordinates.
+ * type:
+ *   Mob type.
+ * angle:
+ *   Starting angle.
  */
-mob_type* custom_category::get_type(const string &name) {
-    auto it = custom_mob_types.find(name);
-    if(it == custom_mob_types.end()) return NULL;
-    return it->second;
+mob* custom_category::create_mob(
+    const point &pos, mob_type* type, const float angle
+) {
+    mob* m = new mob(pos, type, angle);
+    return m;
 }
 
 
@@ -56,39 +64,42 @@ mob_type* custom_category::create_type() {
 
 
 /* ----------------------------------------------------------------------------
- * Registers a created custom type.
- */
-void custom_category::register_type(mob_type* type) {
-    custom_mob_types[type->name] = type;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Creates a custom mob and adds it to the list of custom mobs.
- */
-mob* custom_category::create_mob(
-    const point &pos, mob_type* type, const float angle
-) {
-    mob* m = new mob(pos, type, angle);
-    return m;
-}
-
-
-/* ----------------------------------------------------------------------------
  * Clears a custom mob from the list of custom mobs.
+ * m:
+ *   The mob to erase.
  */
 void custom_category::erase_mob(mob* m) { }
 
 
 /* ----------------------------------------------------------------------------
- * Clears the list of registered types of custom mob.
+ * Returns a custom type given its name, or NULL on error.
+ * name:
+ *   Name of the mob type to get.
  */
-void custom_category::clear_types() {
-    for(auto t = custom_mob_types.begin(); t != custom_mob_types.end(); ++t) {
-        delete t->second;
-    }
-    custom_mob_types.clear();
+mob_type* custom_category::get_type(const string &name) const {
+    auto it = game.mob_types.custom.find(name);
+    if(it == game.mob_types.custom.end()) return NULL;
+    return it->second;
 }
 
 
-custom_category::~custom_category() { }
+/* ----------------------------------------------------------------------------
+ * Returns all custom types by name.
+ * list:
+ *   This list gets filled with the mob type names.
+ */
+void custom_category::get_type_names(vector<string> &list) const {
+    for(auto &t : game.mob_types.custom) {
+        list.push_back(t.first);
+    }
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Registers a created custom type.
+ * type:
+ *   Mob type to register.
+ */
+void custom_category::register_type(mob_type* type) {
+    game.mob_types.custom[type->name] = type;
+}

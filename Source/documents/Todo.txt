@@ -1,0 +1,629 @@
+﻿Point I left on (so I can continue the next day without losing my train of thought)
+    
+    
+Current tasks (tasks being worked on, but not yet committed)
+    
+    
+Next tasks (roughly sorted most important first)
+    --- Known problems ---
+    
+    
+    --- v0.20.0 ---
+    Recreate the script and animation tutorials to be like the area one
+    Details
+        Shadows
+            A way to specify their color and opacity (would help with ambiance, thanks Scruffy)
+            Check if it'd make sense to mark not-tall, always-casts-shadow sectors cast a shadow that's just a line, instead of a rectangle with a gradient
+            A "never casts shadows" option for sectors (suggested by Neo)
+        Make bridges open sectors gradually
+            If the bridge object has a parameter "halfway", it should only open half the bridge sectors. This makes it possible to have two bridges connect to one another from opposite ends. (suggested by Kman)
+        Make White Pikmin inflict enemies with a "poisoned" status effect that saps away health over time
+        "quick suggestion that should take like 10 seconda. put a random timer in the dwarf bulborb, cause all of them moving at the same time is weird / same with every mob that moves like it" -- Kman
+        Add the Inkscape noise filter to more sprites? Or even a different filter
+        There should be a Notification struct which holds data about the current on-screen notification (e.g. Click to pluck)
+            There should only be one on-screen at a time
+            Every frame, you tell the notification what to show, or nothing at all (multiple messages are also allowed), and then tick it. The struct keeps track of what it was showing. If it was showing nothing, and now it was told to show something, smoothly make the notification grow and show up from alpha 0.
+            The same notification could show "(LMB) Pluck", "(1) Pluck", "[X] Pluck", etc.
+        Dwarf Red Bulborbs should scream to wake up nearby Red Bulborbs
+        Should the Beady Long Legs's feet be damageable? It can give some life to the fight, but newbies might think that's the only way to cause damage
+        The pillars of gates cannot be collided with; figure out if they should be a part of the object or not
+        Walls should have a transparent-to-black gradient from the higher sector to the wall, making them look smoother https://cdn.discordapp.com/attachments/459094367877988373/677252580996546560/slope.png (elated)
+        Decorative objects shouldn't cast light in blackout mode
+        Improve the look of the ship's ring
+        An option to control the cursor's movement speed, when not using the mouse (MonkeyUhOh)
+        Make the whistle look prettier and more like a mix between the classic and the new whistle
+            Suggestion: Make the light rings not be ugly circles, but sprites instead
+        Game feel
+            https://www.youtube.com/watch?v=iGDvsbtIAEU&list=WL&index=5 Learn how people play and figure out tweaks and improvements
+            https://www.reddit.com/r/gamedev/comments/b6gh70/common_gamedev_mistakes_part_of_my_job_is_to/
+    Add rudimentary menus
+        Pause
+            Continue, end day, quit
+        Onion
+            Pikmin in Onion, Pikmin with you (/Pikmin in field), ok, cancel
+            Ship too
+        Sunset warning
+        End of day
+            Enemies beaten, treasures salvaged, Pikmin born, Pikmin deaths
+    Every time a Pikmin is meant to attack without latching, there should be a chance that it circles around the enemy for a random time, before it goes for the attack
+    Sounds really need a makeover...
+    Pikmin should push each other a bit
+    Objects should move with acceleration
+    Improve the way ceramic bridge textures work
+    A way to change a mob's speed, rotation speed, etc., via scripting, instead of it being tied to the mob type's speed
+    Find a better name for the demo "game", like "Pikifen demo", instead of "Pikifen alpha"
+    If something is under construction, like a menu or something, add a small "WIP" blurb
+    Maybe add an F1 screen with quick-start help?
+    Add several pre-packaged areas, since players have nothing to play with right now
+        A tutorial area
+            The area should be linear, but more intuitive and representative of the series
+            Linear, starts with an info spot that says welcome, and mentions the movement controls
+            After a bit to the right, there's a Pikmin on a ledge, and a sign telling you to whistle it
+            Farther up, a sign telling you to throw the Pikmin at a Pellet Posy on a ledge
+            You need to gather X Pikmin, to take down a paper bag or something
+            Farther up, a sign telling you to throw Pikmin to Louie, and have him carry on
+            Should end in some way to reunite the leaders, but while trying to incentivize teamwork and multitasking
+            Some signs should talk about dismissing, and group moving
+        A showcase area, with several corridors and rooms for the different enemies, objects, mechanics, collision tests, path tests, etc.
+        Kman's Adventure area (see #content-sharing)
+    Add a ball of yarn treasure
+    Cursor improvements
+        The cursor should change to the standby color, and show the number of Pikmin of that type next to it
+        When holding a Pikmin (or maybe just always?), a trajectory predictor line should appear
+            It should in reality be two quadrilaterals: one funnel-shaped growing away from the leader, till halfway across the throw distance, then another that shrinks till the landing spot; this gives a pseudo height effect
+            If a Pikmin/leader cannot reach on top of a ledge, the predictor should cut off at the wall; this is more intuitive than the cursor getting a cross that blinks
+            The indicator should have a texture that's like a zebra-crossing, and the texture should animate by moving forward in the direction of the throw
+        Maybe make it so that terrain too high for the current standby Pikmin type to reach receive a semi-opaque dark overlay?
+        Game configurations for the cursor
+            Leader cursor: unlimited or distance-limited?
+            Whistling: can be on cursor or distance-limited?
+            Throwing: can be on cursor or distance-limited?
+    Whistling lying Pikmin should make them get up and go to you
+        Change the animations to just be the Pikmin lying down, looping on that frame, and make the time to get up be controlled by a timer
+        When whistled, set that leader as the focused mob, and when it gets up, check if the focused mob is a leader (watch out for teams!). If so, add to group
+    Gates should have a different appearance depending on how damaged they are
+    Missing animations and animation improvements
+        Pikmin
+            Sighing
+            Bored (lying down, looking around, etc.)
+            Flailing (also used when caught by an enemy)
+            Shaking after leaving the water
+            Carrying
+            Celebrating
+            Crushed
+            Blinking when walking or idling -- these animations should start in random frames
+            Climbing (add the track logic too)
+            Sliding (add the track logic too)
+            Pushing (add the group task logic too)
+            Arms outstretched (add the group task logic too)
+        Leaders
+            Bored
+            Throwing (it exists, but isn't being used)
+            Thrown (add to the logic of bouncers too)
+            Climbing (add the track logic too)
+            Sliding (add the track logic too)
+        Sprouts should have their tops sway in the wind, and the animation should start with nothingness, and grow into a sprout proper (as if popping out of the ground) (Kman's made some)
+        Pikmin lying down should be farther back than they are (at least for the Red Pikmin)
+        Smoothen some of the more jerky animations, like Red Bulborbs flopping
+        Using blurring and better lighting in pretty much all of the engine's sprites
+        Shade the Onion legs
+        Yellow Wollywog should close its eyes when shaking
+        Candypop Buds should squash when they close
+        Animate the Hocotate ship -- use Kman's zip
+        Explosions https://www.patreon.com/posts/explosions-part-7719254
+        Onions have dead space to the left in the SVG
+        Allow any animation to interpolate the transformations (rotation, scale, etc.)
+    Rock Pikmin
+        Should be unable to latch
+        Should lunge on their own when attacking
+    Try to compile on Mac
+    
+    --- v0.21.0 ---
+    Menus
+        Pause screen
+            Radar
+                https://en.wikipedia.org/wiki/Topography topographic drawing, a zoom-out, an abstract texture like P1/P2, ...?
+                Go Here!
+                When it is opened, it should fade in to view, as well as zoom out, to give the impression that the camera is moving up to show a larger view, from the point the leader is
+                Allow it to be panned by dragging any mouse button -- people who are used to dragging with RMB on the editors will be thankful
+            Should contain the list of Pikmin on the field and such, but also the number of deaths today, and so far
+            When "end day" is chosen, it should warn about idle Pikmin that will get left behind
+            The total play time should be shown somewhere; useful for speedruns
+        Onion menu
+            Onion improvements
+                There should only be one Onion object, and you can specify what types it can have inside using spawn vars
+                You could have a solely-Red Onion, a Blue+Yellow Onion, and an Onion with all types, all in the same map
+                If Pikmin have multiple Onions they can take something to, they should pick the closest.
+                When queueing Pikmin to take out, keep in mind that if you go to Onion 1, ask for 90 Pikmin, then go to Onion 2 while those Pikmin are still coming out, and try to take out Pikmin, it can't let you take out more than 10
+            Buttons (maybe hidden) that instantly pulls out the max number of Pikmin possible, leaves you with 20 Pikmin of that type, or leaves you with 0.
+        Joystick navigation
+            Check Openbox's source code, focus_cycle.c, focus_find_directional()
+                Basically, compare the box centers, check which one has the lowest distance+offset, and select that, for the given direction
+        The ability to load TTF fonts
+        Main menu shouldn't have those ugly rounded rectangles
+    Level end
+        Leaders being KO'd
+        Pikmin extinction
+        Sunset
+            On-screen warning
+            Draw down the safe radius around all Onions
+    
+    --- v0.22.0 ---
+    Music
+        Day + fight
+        Sunset + fight
+        Boss
+        Add to the readme why there's only a normal and a fight variant -- Too many system resources
+    Revamp sound system
+        There are three types of sounds
+            Sounds that play "globally", like the "task complete jingle"
+            Sounds that play from any object that needs them, like there being three waterfalls in the area, and each one having the "waterfall" noise
+            Sounds that play connected to only one object at a time, like the Pikmin going "hop hop" when carrying something should only be connected to the closest carriable mob to the camera center
+            Or maybe there are two types of sounds, only
+                The global ones, like the "task complete jingle"
+                Positional global ones, like Pikmin going "hop hop" when carrying
+                Positional atomic ones, like a Fiery Blowhog spitting fire
+                You register a source to the sound manager. For instance, you register two "Pikmin carrying" sound sources, and have their position pointers point to the carcass X/Y. The sound manager is then responsible for checking if the camera is close to either source, and if it's close to both, at what volume to play the sound.
+        Problems that the system needs to address:
+            If there are two things asking to play the same sound, they should/n't cut each other off/overlay for higher volume
+            If one thing is asking to stop a sound, make sure another doesn't need the sound (e.g. two carriable objects, one finishes being delivered)
+            If two things are playing the same sound but in different spots of the screen, the pan should be an average or so
+            If two things are playing the same sound but in different spots of the area, the volume should be an average or so
+            If a sound needs to have a sudden shift in volume or pan, it should be a smooth transition
+            The ability to handle randomized volumes and pitches (and maybe panning)
+            If a sound needs to stop suddenly, it should fade out (very quickly)
+        For sounds that are tied to a mob, the farther the mob is from the center of the screen, the quieter; panning should be relative to the mob's position with the camera, too
+        Sounds shouldn't assume they're 44100Hz
+        A way to fade sounds in/out
+        Load system sounds from System_asset_file_names.txt
+        When cutting off a sound (like stopping the whistle), make it do a very quick fade out instead. This stops the sound from crackling.
+        Sounds should pause when you pause the game
+        Make it so that only 6 or so sounds can play at once?
+        Options
+            Volume control for sound effects, music, and ambiance sound effects separately
+            Mono/Stereo
+        Footsteps should be tied to the terrain texture
+        It should be possible to play sounds both in specific frames of animation and in scripts as actions
+        Some sounds should be able to start a random of amount of time after they're supposed to. This helps everything feel organic instead of robotic and calculated.
+        Missing sounds
+            Pikmin seed landing
+            Pikmin sprout evolving/reverting
+        Recreate the following sounds, as per user feedback
+            Plucking -- sounds like crap
+        This might help
+            https://www.allegro.cc/forums/thread/617315
+            https://youtu.be/Vjm--AqG04Y?t=713
+            https://www.allegro.cc/forums/thread/617707 ?
+            https://www.youtube.com/watch?v=PVA48I2n-qQ
+            https://askagamedev.tumblr.com/post/188860396561/one-thing-i-love-about-your-blog-is-learning-about a sort of priority system
+        Fixes
+            When you cancel holding a Pikmin, its standby squeal sound should stop
+    
+    --- Future ---
+    Input handling needs to be more robust and modular
+        Clean up terms -- button, input, action, are all ambiguous and mean different things in different functions
+        An Allegro event is turned into a abstract action report and pre-processed (some actions only want 0/1, others want it raw), and only then sent
+        Each action should be able to specify if it allows button-downs without button-ups (for Pikmin, holding A to whistle, and then pressing B shouldn't restart the whistle, but in Rhtyhm Heaven, holding A to do a hit, and then pressing B should be another hit)
+        Be careful with camera zoom in/out!
+        When the window focus is lost, the controls should be "released"
+        Make input_manager as atomic as possible
+        Allow for button combinations
+        Would it make sense to have a screen stack system, with push&pop?
+        Try to make it deterministic enough to support input playback (replays)?
+        Save the controls in the options file inside a block, and possibly at the end of the options file
+        Should the option name + string representation be in input_manager or outside?
+        Rework the controls menu to be more intuitive
+            Maybe a list of saved control schemes, like the list of saved rulesets in Smash Ultimate? It could come pre-packaged with Keyboard+Mouse, JoyCon, etc. Careful with generic controllers though, since their buttons are as good as random. Also, if there are four players, and they all want JoyCons, there should be a way for them to choose which is which
+            Maybe a "simple" controls menu and an "advanced" one? The advanced is the old one, but the "simple" one lets the player choose a controller, only map the most common controls, and automatically associate an analog stick to all four directions. If I do this, I should add a tip to the readme to tell people to try the advanced controls after they're comfortable with the engine.
+        Current leader should move slower if the analog stick is not held all the way
+        If you're holding a direction as you read a sign, you'll continue to go in that direction, even if you let go. Pressing again fixes this. Make sure this is fixed.
+        There should be a cap on how many Pikmin can be thrown per second -- if the player presses the button while in cooldown, it should probably queue the throw -- the same needs to be done for other buttons, probably
+        If you're whistling, pause the game, release the whistle, and unpause, the game will probably not detect the release -- do something about it
+        When the window loses focus, it should reset the inputs, so that if you were holding a direction when the game lost focus, you won't have your leader keep walking (Ambrosia)
+        New approach, thought of long after I've paused this project:
+            One layer transforms hardware inputs into clean inputs, like mouse down, joystick axis positive (after joystick sanitization), etc.
+            Another layer transforms those inputs into actions, and it knows that some actions only want 0/1, others want the raw value, etc.
+            The final layer performs stuff in game based on the actions - a queue. This is important because the queue may want to delay actions. For instance, every item in the queue has a TTL. If the next item in the queue is a punch, and the game can't handle the punch, it can delay the event, and knock its TTL down. If in a later frame, it can be handled, good, but if not, it times out and dies. This makes it so the player can press LMB to punch while in the middle of a punch, and then let the input get processed whenever possible (within the TTL)
+            One of these layers has to take care about not letting a LMB1-down event come after another LMB1-down event without an LMB1-up event...
+            Idea: the action manager has a list of all actions and their states (float from 0 to 1), as well as the state the previous frame, so the engine can check if a whistle was released, for example (1 last frame, 0 now) -- probably have different systems in place for the global game input and the gameplay game input? Like, have a different system for checking inputs outside of menus, so that if B is held during the menu it is considered as pressed the very first frame the menu is gone
+            Instead of letting the game layer have to worry about normalizing joysticks, let the hardware layer do so
+    Purple Pikmin's pound attack + stun
+    Petrified enemies shaking before getting out, and breaking open when defeated while petrified
+    Normal hitboxes should specify what happens when a thrown Pikmin touches it -- latches, bounces off, or ignores (right now, all non-latchers are bouncers, so throwing a Pikmin while on top of a fire geyser results in the Pikmin bouncing back)
+    Enemy revival
+    A way to start a timer after a random amount of time, based on the coordinates; this allows stuff like a group of fire geysers to start spitting fire at different times
+    The ability for Blue Pikmin to rescue drowning Pikmin
+    Floors-over-floors; mostly for bridges
+        Revamp physics
+            The logic is the same as the old logic, except replace sectors with floors
+            Can I add slopes?
+            To figure out what floors to use:
+                If the mob is touching the FOF, the FOF's Z
+                Else, the normal floor Z
+            If the sector a mob is going into has a FOF, the FOF can be unaccounted for at collision check time, but then the mob may end up inside of it after it enters the sector, and needs to do a step up
+        To draw their shadows
+            4 pixels of purely black alpha 80%, then 8 pixels of gradient to alpha 0
+        Bridge railings
+            Make the railings be created automatically, based on the height of nearby bridge sectors
+            Make them 1 unit higher than the bridge floor
+            Make it so it's impossible to step if the sector you're on is of the bridge type, and the sector you're stepping into is of the railing type
+        Edge cases:
+            FOF stairways need to work well
+            Can a mob go from sector A's main floor (0), to sector B's main floor (50), to sector A's FOF (100), to sector B's FOF (150)? SHOULD it?
+        Precautions:
+            FOFs in dark sectors should be dark
+            Make sure users can create a FOF that's 0 units above the main floor, for decoration purposes, and that this does not have an impact on collisions and whatnot
+        Misc
+            Does it make sense to create a FOF above a bottomless pit?
+            https://www.deviantart.com/ronindude/art/Battlemap-Beach-Cave-730069774 I like the style of this -- maybe it can help with readability?
+    Challenge mode stuff
+        Challenge levels can override the global day time settings -- a level could want to start at dusk and end at night, and could want to do it all over 1 real-time hour
+        Each stage should say what its difficulty is, like it does with the creator and such
+        Each stage should have a goal -- the three main goals from Pikmin 3, Get the Target Score!, Survive!, Reach the Exit!, Deliver X to Y!, Grow X Pikmin!, Defeat Enemy X! Escort X! (partial thanks, Jimble, Kman)
+            And different sub-goals: without getting spotted, until time runs out
+            Each stage should have different scoring criteria. While there is only one goal, the final score should depend on any combination of the following, with varying weights: Pikmin born, Pikmin deaths, time taken, Pokos gathered, enemies killed. It could also have no scoring, just a boolean completion; this is useful for puzzle levels.
+        Treasures and resources should be able to give points (Pokos)
+    Buried treasure
+    Dweevils should carry treasure
+    Weather improvements
+        Maybe call it ambiance?
+        All parameters (wind, blackout, precipitation, etc.) should be configurable in a minutes table
+        Make it possible to have a weighted random distribution table for what other weather conditions it can change to as time goes by.
+            Example: 80% clear, 20% overcast, set to pick every hour. It could make it so it's clear at 3PM and 4PM, but starts getting overcast between 4 and 5, and uses the overcast weather at 5PM
+        Wind
+        Precipitation
+            Only on sectors that have full brightness, which are presumed to be outside -- make this a setting, though
+                If this is too processor-intensive, then have caves and insides be controlled by area scenes, like how Pikmin 3 splits into scenes
+            https://www.youtube.com/watch?v=66f6bI2uIdQ
+            https://gamedev.stackexchange.com/questions/164361/2d-blizzard-snowstorm-effect
+            Idea:
+                Since I can't draw all particles of precipitation that are in the entire area at once, and since the devs need to be able to control the density, the area is separated into an imaginary grid, much like how the blockmaps work.
+                Any given grid cell can only have one particle (though if something like a leaf flutters about randomly, it can leave its grid cell).
+                All particles spawn in waves, though for variety, all cells have a fixed delay, ranging from 0 seconds to the wave duration.
+                    A cell's random delay can be obtained by hashing its X/Y coordinates.
+                The X/Y coordinates of where a particle spawns inside a cell are random every wave.
+                    These are obtained by hashing the X/Y coordinates and the current wave number.
+            Snow, wind, leaves, embers
+        Thunder flashes
+            Maybe have an option to make the flash much weaker, because of seizures?
+        Types of blackout
+            Only the leaders, only leaders + Pikmin, everything but leaders + Pikmin, etc.
+            Specific enemies that don't cast light, so you can have Phosbats
+        Mist
+            See if that clashes with fog, or if it can be its own thing
+        Floating particles found in caves -- or should this count as something different from weather? Maybe it'd work better as an object that spawns them
+        Position of the sun, and position of the moon?
+        Set the entire area to a hazard during a part of the day (e.g. rain that drowns non-Blue Pikmin)
+        Set the direction of the sun -- indoor lighting likely uses a fixed light direction
+        A way to control what parts of the area use what weather -- that way, a cave can use a blackout, or stay out of rain
+        You should be able to tint water -- for instance, at sunset, making the water look a bit more pink
+    Replay
+        A vector of "abstract" objects
+            A parameter with info if they're an obstacle, Pikmin, leader, enemy, or treasure (reflects how they're drawn)
+            An array of their X/Y over time; saves once a second or so
+            A parameter for their time of death and time of creation
+        A vector that contains when a leader change occurred, and to what leader
+        When playing back the replay, interpolate the position of the mob between the last key-moment and the next
+        Save into a binary file so it can be shared with other players
+        Make replays save whenever there's a crash dump
+    Multiplayer
+        1 struct of info for each player, multiplayer controls
+        During loading, show how the screen is going to be split, and show which player is in which screen
+        Split-screen logic: vertical, horizontal, and four-way
+            Add HUD support for all the different layouts
+        Make sure that:
+            Leaders can't steal each other's group members
+            Logic like culling isn't relying on just the first player
+            Make sure Pikmin can't carry something the opposing team is already carrying
+            Candypop Buds can't accept Pikmin from another team
+        Figure out how the game is meant to work when a pause happens -- when an Onion menu is entered, radar is opened, game pause is activated. Show the menu in full-screen or just the player's menu? Pause the game for that player, all, or none?
+        Change menus to let you pick how many and which players will play
+        Rules and game modes
+            Point capture
+                When a Pikmin is on top of a point, it slowly captures for that team, a la TF2. The more Pikmin, the quicker it captures
+            Build a Wonder
+                Like in Age of Empires, you can gather materials into a spot, and once you have enough, you can start building a Wonder. If you manage to build it, you win automatically
+        A way for attack hitboxes to cause no knockback, otherwise Pikmin battles will keep knocking the Pikmin down
+            Maybe add three types of knockback: none, flinch (makes leaders reel back in pain and Pikmin fall over), and chuck
+        Competitive Mission Mode? Pikmin can't attack each other, and the player with the highest score at the end of the mission wins. Probably requires symmetrical maps, or all players starting in the same spot
+        If there is bingo, then there should be an option to allow simultaneous bingo patterns to score multiple points. Like if the final thing you collect scores 3 lines at once, you up 3 points in the overall standing. (Nieton's idea)
+    Caves
+        Cave units
+        Some randomization algorithm...
+    Story mode stuff
+        Persistent progress saving
+            Write somewhere that the save was successful, and warn about save errors
+            At the start of a new day, open bridges, dead enemies, etc. should go to the final states instantly
+            The save file should contain a checksum for the save file proper, and one for the game files/folder
+        Cutscenes http://www.pikminwiki.com/Cutscenes
+            Make all cutscenes skippable
+            Either make everything freeze during cutscenes, except for the actors that are part of it, or make everything continue, but health values be frozen (this way, leaders and Pikmin won't get hurt while the player can't react)
+        Sprouts between areas, days, etc.
+            Don't forget that sprouts should turn into flowers overnight
+        Wild Pikmin and sprouts should be immune to the sunset
+        Enemies respawning after some days
+        Area unlocking
+        Pellet Posies, Candypop Buds, etc. should only cycle between the colors available
+        The ability for dead flower Pikmin to leave a sprout for the next day. The game settings can specify the change of a dead flower leaving it behind (including 0% to disable the feature)
+        Catalogs
+            There can be multiple catalogs -- Piklopedia and Treasure Hoard are two different catalogs
+            A file, likely Game_data/Misc/Catalogs.txt is responsible for:
+                Which catalogs exist, as well as their icons, unlock criteria, etc.
+                What entries exist in each, in order
+                What logs each entry contains (Olimar's notes, Louie's notes, Sales pitch, etc.)
+                How each entry is unlocked (touching it, seeing it, killing it, recovering it to an Onion/ship, etc.)
+        Collectibles (ship parts, treasures, etc.) and how they impact the story
+        Upgrades (like the Exploration Kit)
+        Extinction
+            Be careful with Candypop Buds
+            Cave extinction should probably be named something else, since the Pikmin species aren't necessarily extinct...
+        Day limit
+            A "casual mode" option where you can disable the day limit, if the game allows that?
+        Today's Report
+            One long page filled with everything, that the player can scroll up and down -- this way there aren't several pages the player has to mash through, and it's scalable with any number of Pikmin types, content, etc.
+                Population chart over the day, with icons for key events
+                Deaths by type, both today and so far
+                Total number of Pikmin left in the Onion
+                What objective items were collected today
+                Total of the objective collected, and total remaining
+                The player can press a button somewhere to watch a replay, or click to continue
+        Final stats
+            Completion time, in seconds
+        Misc.
+            The ability for some Candypop Buds to not spawn if the player has over X Pikmin of that type in total
+    More editors
+        Weather editor
+        Particle editor
+        Script editor
+    Probably more...?
+    
+    
+Small tasks (for when I'm feeling lazy)
+    Style
+        Document the code with comments
+        Make all functions separated by two blank lines
+    Cleanup
+        Remove magic numbers and magic strings (make numbers and strings into constants)
+    
+    
+Misc things (so I don't forget)
+    Loose thoughts
+        With the current Pikmin "missed hitbox" register, it's possible that an enemy will want to attack with the same hitbox multiple times in the same animation, but all those times will be ignored for 1.5 seconds (think the Man-at-Legs's shots)
+        Maybe make it so that when a mob touches a hitbox, it sets a flag, and if the next frame it also touches a hitbox, ignore the event; repeat until there is a frame where the hitbox hasn't been touched -- this could stop the mob from getting hit multiple times by the same hitbox
+    Aesthetic
+        More juice
+            Sun Meter should grow on checkpoints
+            HUD number of Pikmin on the field/army/etc. should grow when they change
+            HUD should come in/out of frame when pause is used
+            Find more ideas from the canon games
+        When a spray is about to run out, make the mobs flash
+        Health wheel should gradually turn from the current angle to the actual health
+        Obstacles should have a different health meter, so it doesn't look like health, but rather completion progress
+        A property for mob types to control whether the health is always visible, or disappears after X seconds, only to reappear when the cursor goes over them
+        Earthquake effect
+            See [[Rumble]]
+            If the earthquake emitter is at the center of the screen, full intensity. The farther it is, the weaker the intensity. I think 2x offscreen or more should be 0 intensity.
+            https://www.reddit.com/r/justgamedevthings/comments/7g3qty/what_do_you_mean_dont_overdo_it_with_the/
+            https://www.youtube.com/watch?v=tu-Qe66AvtY
+                Have a "trauma" variable (0-1) that goes up (something like 0.4) every time a shake happens, and goes down over time
+                When shaking the screen, the multiplier of the amount to shake should be trauma^2 or trauma^3 so it's smooth
+                Don't offset the camera negatively, but use something like offsetX = maxOffset * shake_mult * GetPerlinNoise(seed, time);  offsetY = maxOffset * shake_mult * GetPerlinNoise(seed + 1, time);
+                    Or instead of PerlinNoise, use simple value noise http://www.scratchapixel.com/lessons/procedural-generation-virtual-worlds/procedural-patterns-noise-part-1/creating-simple-1D-noise
+        Dust particles while walking
+        A spray of whistle particles for when there's a dismiss, and whistle particle "smoke" when group moving
+        Camera should mostly center on the leader, but offset slightly towards where the group is, offsetting more the more the group is farther away, maybe also pointing a bit to where the leader is headed, etc.
+        Make the mob sprite scale when hurt, like an elastic
+        Mobs shrinking or increasing in size because of their height should be limited -- fall too much and your dimensions turn negative
+    The makefile should have a "clean" rule, a "debug" rule a "release" rule, (with -Wall) etc.
+    An option for the cursor to snap to the nearest object in-game, with an adjustable radius
+    A Pikmin that's on fire and runs to the water should probably drown instead of continuing to be on fire
+    Water isn't fading with darkness if you have fader textures https://cdn.discordapp.com/attachments/347158607734767636/449334153763356672/Pikifen_alpha_5_24_2018_6_12_41_PM.png https://cdn.discordapp.com/attachments/459094782648778772/491739297548992513/unknown.png
+    Carrying stuff
+        A traffic system? Here's my idea:
+            Each stop link can hold a capacity number. The maximum value is the length of the link. Whenever a mob is taking this link, the mob's diameter (plus some padding?) is added to the value, and when a mob is no longer taking it, it is removed. When a mob that is carrying something is trying to enter a full link, it will stand in place instead of proceeding.
+            Be careful for Pikmin carrying things in opposite directions. Maybe have a tie-breaker in some way?
+        When there are multiple Onions or ships that something can be delivered to, choose the closest
+        Smoother turns when carrying
+        If a Red Pikmin is carrying a 1 pellet, and a Yellow joined, shouldn't the destination be Red, and not randomized?
+        Make it so you can line the Pikmin on non-circular fashion -- Neo suggested a parameter to stretch the circle vertically or horizontally
+        When deciding a new random Onion to go to, pick cyclically -- first go with Red (if applicable), then if the player does it again, go Yellow (if applicable), etc. (GitHub issue #8)
+    For intervals, use the code on the "misc info" text file
+    Water depth (Thanks ThyCheshireCat)
+    A way to add random variation to the knockback angle of a hitbox
+    The scale category doesn't really need to exist -- the code that gets the current weight could be something any mob could use, and a way to display a custom number atop the mob could be addedd to the script (Kman)
+    Enemies could have individual territories -- a circle that can be anywhere (detached from the mob) and have any radius, and the mob has to be confined to that
+    Look into the "Next maturity" controls -- does the way they work make sense? Why can't you switch without holding a Pikmin?
+    I think I found a way to do addictive blending right -- for instance, to draw a mob green, first you draw it multiplied by green (0, 255, 0, 255), then you draw an addictive sprite on top with 0, 255, 0, 128 -- seems to work well on GIMP
+    Try to make it so you can add a script to treasures, ships, etc. This makes it possible to play sounds, launch particles, etc.
+    Show the number of Pikmin of the current type next to the cursor
+    Add an option for statuses to disable a leader until the player presses right-click or something (Neo)
+    Objects falling from the sky
+        When a leader approaches, when a Pikmin approaches, when carrying, etc.
+    The toggle reference button in the area editor should be grayed out if there is no reference set up
+    Add shaders
+        Can the grid be more contrasting? Darker on top of light things and vice-versa...
+        Make the water ripples be via shader
+            https://www.reddit.com/r/gamedev/comments/d1a602/how_scrolling_textures_gave_super_mario_galaxy_2/
+    Maybe water should have random sparkle particles?
+    A way for Pikmin to resist being shaken off
+    A way for status effects to add to the time left, instead of resetting it or leaving it as is
+        Spicy spray to reset the time if it is re-applied
+    Add the feature that makes dead flower Pikmin sometimes drop a sprout, before the story mode is done? It could spawn a sprout for use later in the day
+    Option to pause the game if the window is not focused
+    The spray effect that buries Pikmin should probably only affect opponent Pikmin
+    on_carrying_lift and on_carrying_drop events?
+    A checkbox for the attack hitboxes that make it so the knockback simply pushes without actually making the Pikmin/leader fall over (Kman)
+    A way to represent how many berries of a spray you have
+    If you write an event name wrong (or other things), give suggestions ("did you mean X?")
+    If a Pikmin type has black as the color, the idle glow needs to... not be black
+    Seeds should take time to transform into sprouts -- this encourages the player to multitask instead of waiting for loot to be delivered to the Onion
+    The ability for status effects to add/remove HP in absolute amounts, not relative
+    Health regeneration should always be a status effect, not a permanent thing. In addition, a status effect with regen should be able to specify if the regeneration only happens after X seconds of no damage, or if it's always active (good to make it so Pikmin only regenerate if they are not constantly under attack)
+    Area sections
+        Large rectangles that are imposed on the area to specify certain things
+        Ideas of sections
+            Radar limits -- any sector beyond this rectangle does not show up on the radar. Alternatively, any sector INSIDE the rectangle doesn't show up
+            Indoors/Outdoors -- used to control if precipitation can fall in here
+    When a Pikmin is being burnt up or poisoned, etc., have a few frames at the start of it where it CAN'T be whistled to be saved. This prevents the player from whistling in the area of a soon-to-be burned Pikmin, and save the Pikmin instantly
+    Area background improvements
+        Support for backgrounds that don't tile -- what if you want a background that's a tree trunk, because you're on branches? It shouldn't tile, nor should it have thousands of pixels of blank space for padding
+        Add background viewing/editing to the area editor
+        Foreground
+    Would it make sense to add a foam texture on top of the water texture, where the water reaches the shore, and/or hits a wall?
+    Consider giving water surfaces their own Z. Not just for drawing, but for the purposes of considering something submerged, too
+    If there are no Onions, Pikmin should bring corpses to the Ship
+    If your Pikmin are far away and you dismiss them, they should just create groups where they are, not next to where you ordered the dismiss...right?
+    Pikmin movement and other actions should have random offsets and delays of tiny amounts, just so that the army feels like a group of individuals, instead of several robots
+    New actions
+        Logic for an arachnorb to turn to/chase the focused mob?
+    Make it so enemies can understand what hazard they entered or left (needed for the Fiery Bulblax)
+    If Pikmin are killed (off-screen, on-screen, or both?), the counters should have some feedback -- this helps audibly impaired players who can't hear the Pikmin squeals
+    Calculate the entirety of the scene's lighting in a lightmap, that gets overlaid in the end
+        Apply fog, blackout, sector darkness, etc. on this
+        Check if this would have a large performance impact
+        This would allow mobs to cast light, which would just lighten up that zone of the lightmap
+    Demo game content to add
+        Enemies
+            Pikmin 3 exclusive enemy
+            Scuttlebug?
+            A completely original enemy
+        Pikmin 3 leaders
+            When adding this, change the President's style to be yellow instead
+        Bulbmin, Cyan and Green Pikmin
+    Carrying path revamping
+        Patrolling enemies need to follow a path -- they can't reuse the carrying path (e.g. Nectarous Dandelflies). Maybe make it so you can create multiple paths on the area editor?
+        Paths that only Pikmin exclusive to a certain hazard can take (paths on the water for Blue Pikmin)
+        The logic that figures out the first and last path stop needs to be reworked -- when calculating a path from X to Y, with Y not being in a stop but being perfectly reachable, but also with Y being closest to an unreachable stop (locked behind a one-way link, for instance), the engine will be unable to find a path to that perfectly reachable location
+        Maybe make it so some paths can only be crossed if what is being carried is less than X width?
+    If a Pikmin is too far away, it should sigh and lose the party
+    The ability for objects to be not-circular, but ellipses
+        Used for placing carrier Pikmin around irregular-shaped objects
+    Particle improvements
+        https://www.youtube.com/watch?v=bIjrSvGddDQ
+        Particles should have a secondary way of dying - shrinking instead of exclusively fading to transparent
+        Color gradients, or interpolation, or some way to get smoke from red to yellow to grey
+        The size, color, etc. parameters should be split into "start", "half", and "end" of life
+        Each generator in its own text file? It'd make it easier to share them
+        Additive blending and normal blending
+        Spawning some distance beyond the center -- good to get the smoke from the BLL's stomp to start near the edges of the feet, not the center
+    HUD element for a digital clock?
+    >Oh, yeah, quick suggestion, make all of the pikmin that a leader has get disbanded and maybe panic around for a bit when the leader dies (Neo)
+    A load creator tool that just lists how many particles are active, how many mobs, bitmaps loaded, etc.
+    Creator tools should be bound to buttons in the same way the regular controls are, instead of being stuck in the number and F keys
+    Some console on the editors, so you can have extra tools that don't require an elaborate GUI?
+        For the animation editor: copy animation, reverse frames, rename animation
+    Switch angles to vectors?
+    In multiplayer modes, if players in different teams throw Pikmin into the same Candypop Bud at the same time, that might cause problems
+    In challenge levels, the engine should probably keep track of how many tries the player had
+    Game config parameters:
+        Nectars: Work like in the engine, or like in the classics?
+    Should I auto-fade textures on stepping height?
+    Some treasures should weigh as much as the current army, after a boss battle
+    
+    
+Tasks for later on (I might never implement these)
+    Known problems
+        On my other laptop, screenshots come out with alpha
+        It's possible to select two options at once in the editors's pickers - there might not be a need to fix it if I just use ImGui
+        Kman found a crash on the area editor -- area with invalid shadow, restart engine, area editor, find problems, go to problem -> crash -- I can't reproduce, but it must have something to do with pointers not being cleared
+        >trying to fight a bublorb >wait no >i killed it and was carrying it back >and a dwarf bublorb came along >and tried eating one of the guys carrying the big bublorb (found by Ambrosiu㎂ and some others, currently unreplicated)
+    ...An AI opponent in 2-player mode? It would help me test...
+    Colors should be able to also be in hexadecimal
+    The ability for enemies to eat other enemies
+    If I need performance gains, resize textures to smaller sizes when they're loaded (Kman)
+    A way for spike damage to apply a status effect
+    A way to write out how much memory is being taken up by images, sounds, scripts, etc. so game creators can help make sure a level's not too bloated?
+    Nighttime (what enemies can spawn at night, their changes, etc.)
+        Change the HUD icon to a moon
+    "Puzzle"-type challenges. You might have a limited number of Pikmin, certain obstacles and paths, and you need to think what Pikmin to put where and when to proceed. Like Portal.
+        Door objects
+        Button objects (with a certain number of Pikmin needed to keep it depressed)
+        Marks on the floor -- Red Pikmin carry things to the red mark, Yellows to the yellow mark, etc.
+    If feasible, make it so that every enemy checks if there are Pikmin around it (check one out of every two Pikmin), this check shouldn't be distance based, but dx and dy based. If there is any Pikmin or leader nearby, or it's on-camera, then fully work the mob as normal. Otherwise, don't do anything to the mob.
+        Maybe keep a timer that goes back to ~2 seconds every time a Pikmin/leader nearby is detected, and until it reaches 0, do not check for loneliness.
+    Random enemy spawning
+    Breath of the Wild-like physics engine rules? https://venturebeat.com/2017/03/02/the-legend-of-zelda-breath-of-the-wild-makes-chemistry-just-as-important-as-physics/
+        And just systemic gameplay in general, like lit Pikmin lighting nearby Pikmin on fire http://www.youtube.com/watch?v=SnpAAX9CkIc
+            Red Pikmin can carry flaming coals, which can set enemies on fire
+    Enemies don't care about bottomless pits and will gladly walk off when roaming -- is there any way to remedy this?
+    Hiding
+    Warp point, like in Pikmin 3
+        Carrying paths should be able to specify a "portal" link, which internally is considered to be 0-distance. This helps calculate the destinations without considering two warp points as being insanely far apart
+    A colorblind-helping mode?
+    Editors
+        Area editor
+            Instead of a single-click selecting a sector, make it a double-click? This way you can still create a selection rectangle when you're inside the sector
+            A tool that checks every point in the map (more like every 2 units) and checks if the closest carrying point is on the other side of a wall or something
+            When choosing textures, list all of the existing ones, if plausible
+            The area editor could have a button to start testing from where the cursor is, a la Mario Maker. Also, to spawn some Pikmin with, maybe
+            When deleting a mob link, flash the link red when you mouse-over. Similarly, flash a potential linkable object yellow when you mouse-over it. Think of doing the same for other similar operations
+            Double-click in object mode -> create new object on cursor. There are a lot of corner cases though, like double-clicking a selected mob, double-clicking after a drag, double-clicking while in the add new mob mode, etc. This can result in the player accidentally adding a new mob while trying to do something else
+            When an area is saved, delete the backup. When an area is loaded, if a backup is found, ask if they want to restore that backup instead.
+            The ability to add comments to an area; they should show up as like a question mark, and when you click it, you see/edit the comment in the panel
+            A way to set the opacity of mobs in layout mode; possibly others of the sort (Kman)
+            A feature with which to search for mobs/sectors
+            Buttons to align textures with the sectors, stretching them to fit, or to tile twice, three times, left-aligned, right-aligned, etc.
+        Animation editor
+            Version 3.0
+                "Sprite" -> "Pose"?
+                You start by being presented with the spritesheet, then you click on a sprite, write its name, click on the next, its name, etc.
+            Add a section to find errors
+                It could check what kind of animation this is, like a Pikmin type, and determine that there are some needed animations that are not included
+                Enemy has attack hitboxes that don't hit below it?
+        Both editors
+            Put the canvas in one ImGui window and the panel in another?
+            A tutorial built into each editor?
+            Hold Ctrl while dragging to lock to an axis?
+            For buttons that change the state of something (e.g. toggle reference image on/off, change current snapping mode), I need to figure out what to do...
+                a) Have the icon represent the current mode?
+                b) Have the icon represent the next mode?
+                c) Only use buttons for one-off actions, and use checkboxes or something else for these mode-changing widgets
+    "'lafi_widget' : class has virtual functions, but destructor is not virtual" Is this important?
+    Blood (optional, of course)
+    Some way to let users organize their mob types into sub-folders, and have that reflect in the area editor
+    Enemies should have a cloud of breath in cold areas (GitHub issue #10)
+    Resolution
+        Players should be able to resize the window on-the-fly (GitHub issue #2)
+        Resizing the window should stretch the resolution instead of showing more of the world (GitHub issue #7)
+    Aesthetic details
+        Different "switched to Pikmin" sound for when you switch to a held leader instead of a Pikmin
+        When writing a message on the bottom of the screen, make the letters have some effect, to pop in and move out
+        HUD elements that aren't needed right now should be super-transparent. For example, in Metroid Prime, when there is no hazard danger, the meter on the right is barely visible, but is still there
+        Make the main menu's highlighter move from one place to another gradually, based on how far it is (like the camera moves in-game)
+        The music should change to swing for Louie
+        Splash particles for going in water
+        Particles should have a "emits light?" property
+        Particles floating in the wind
+        Beams of light shining between the leaves; they should spin with the sun, and sometimes fade out to non-existence
+        Shadows of leaves should shift along the day, and become less opaque at the start and end
+        Clovers, Margarets, etc. rustling should also maybe move up and down a bit, so that it's a bit of a circular motion (ellipse, really)
+        A background detail: those little floaty white things you see in forests
+        Cloud shadows? When a cloud is casting a shadow, tree shadows shouldn't exist
+        Custom font for the editors
+        Water should reflect clouds and the sun... and maybe other things like an aurora borealis?
+            https://www.reddit.com/r/aestheticrain/comments/7m61zy/blossom_on_a_pond_1080p/
+            See the Pikmin 2 ending movie, for instance
+        Water should be shown in the area editor's review mode
+    A competitive mode where each team's marble is out in the open, but you can throw Pikmin at piles of twigs, shards of iron, etc. found in the area. They carry it (like bomb rocks), and when thrown in the room where the marble is, they start working with the materials they have and build a solid block. Creating complex mazes and traps with the blocks is what stops the enemy team from gathering the marble so easily.
+    Barely important format changes
+        Status effects shouldn't have several "affects" properties, but just one, that takes a semicolon-separated list
+    Online play?
+        It'd likely use deterministic lockstep https://gafferongames.com/post/deterministic_lockstep/
+    Possible cleanup
+        Timers
+            Have a timer manager, so I don't have to remember to do a .tick() to every single one
+                Remember that the fade manager can unload the current game state!
+            Create auto-eased timers? Like, they return a number from 0 to 1, and can use several methods, like 0->1 in the first half and then 1->0, or eased in, or...
+            A flag that specifies whether it auto-starts on creation, whether it auto-rearms after reaching 0, etc.
+            Thoughts:
+                Actually, the only advantage of this is the auto-ticking... But it might introduce a performance penalty, having to add and remove hundreds of timers in a vector
+        https://www.gamasutra.com/blogs/ScottLembcke/20180404/316046/Improved_Lerp_Smoothing.php
+        https://gamasutra.com/blogs/JiriHolba/20200511/362690/Should_STL_containers_be_used_in_game_engines.php
+    Specific requested features
+        An enemy that can heal, for instance, 20HP for each Pikmin eaten
+        An attribute for Pikmin types that makes it possible to throw them farther/closer than standard
+    Suggestions that aren't really justifiable yet, but may be one day
+        An action with which to change a mob's home
+    Questions to be answered later
+        Change the logic of Pikmin chasing after opponents (pikmin_fsm::go_to_opponent, pikmin_fsm::rechase_opponent) to better suit rectangular objects?
+        If P1's leader throws a mine at P2's leader, and it sticks on them, that leader will be *holding* the mine. This will probably break a lot of logic that assumes holding just refers to the pre-throw Pikmin hold

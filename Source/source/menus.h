@@ -18,9 +18,22 @@
 #include "game_state.h"
 #include "menu_widgets.h"
 
-using namespace std;
+
+using std::map;
+using std::size_t;
+using std::vector;
+
 
 class main_menu : public game_state {
+public:
+    main_menu();
+    virtual void load();
+    virtual void unload();
+    virtual void handle_allegro_event(ALLEGRO_EVENT &ev);
+    virtual void do_logic();
+    virtual void do_drawing();
+    virtual string get_name() const;
+    
 private:
     struct logo_pik {
         point pos;
@@ -32,8 +45,7 @@ private:
         ALLEGRO_BITMAP* top;
         bool reached_destination;
     };
-        
-    size_t new_game_state;
+    
     float time_spent;
     
     ALLEGRO_BITMAP* bmp_menu_bg;
@@ -50,19 +62,21 @@ private:
     point logo_pikmin_size;
     map<unsigned char, ALLEGRO_BITMAP*> logo_type_bitmaps;
     
-public:
-    main_menu();
-    virtual void load();
-    virtual void unload();
-    virtual void handle_controls(const ALLEGRO_EVENT &ev);
-    virtual void do_logic();
-    virtual void do_drawing();
 };
 
 
 class options_menu : public game_state {
+public:
+    options_menu();
+    virtual void load();
+    virtual void unload();
+    virtual void handle_allegro_event(ALLEGRO_EVENT &ev);
+    virtual void do_logic();
+    virtual void do_drawing();
+    virtual string get_name() const;
+    
 private:
-    vector<pair<int, int> > resolution_presets;
+    vector<std::pair<int, int> > resolution_presets;
     
     ALLEGRO_BITMAP* bmp_menu_bg;
     float time_spent;
@@ -76,17 +90,19 @@ private:
     void update();
     void leave();
     
-public:
-    options_menu();
-    virtual void load();
-    virtual void unload();
-    virtual void handle_controls(const ALLEGRO_EVENT &ev);
-    virtual void do_logic();
-    virtual void do_drawing();
 };
 
 
 class controls_menu : public game_state {
+public:
+    controls_menu();
+    virtual void load();
+    virtual void unload();
+    virtual void handle_allegro_event(ALLEGRO_EVENT &ev);
+    virtual void do_logic();
+    virtual void do_drawing();
+    virtual string get_name() const;
+    
 private:
     ALLEGRO_BITMAP* bmp_menu_bg;
     float time_spent;
@@ -107,23 +123,25 @@ private:
     void update();
     void leave();
     
-public:
-    controls_menu();
-    virtual void load();
-    virtual void unload();
-    virtual void handle_controls(const ALLEGRO_EVENT &ev);
-    virtual void do_logic();
-    virtual void do_drawing();
 };
 
 
 class area_menu : public game_state {
+public:
+    area_menu();
+    virtual void load();
+    virtual void unload();
+    virtual void handle_allegro_event(ALLEGRO_EVENT &ev);
+    virtual void do_logic();
+    virtual void do_drawing();
+    virtual string get_name() const;
+    
 private:
     ALLEGRO_BITMAP* bmp_menu_bg;
     float time_spent;
     size_t cur_page_nr;
     vector<string> areas_to_pick;
-	vector<string> area_names;
+    vector<string> area_names;
     
     vector<menu_widget*> area_buttons;
     menu_text* cur_page_nr_widget;
@@ -131,13 +149,6 @@ private:
     void leave();
     void update();
     
-public:
-    area_menu();
-    virtual void load();
-    virtual void unload();
-    virtual void handle_controls(const ALLEGRO_EVENT &ev);
-    virtual void do_logic();
-    virtual void do_drawing();
 };
 
 

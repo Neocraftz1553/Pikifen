@@ -19,7 +19,9 @@
 #include "animation.h"
 #include "particle.h"
 
-using namespace std;
+
+using std::string;
+
 
 /* ----------------------------------------------------------------------------
  * A status effect type, like "burning", "spicy", "petrified", etc.
@@ -91,5 +93,6 @@ enum STATUS_AFFECTS_FLAGS {
     STATUS_AFFECTS_LEADERS = 4,
     STATUS_AFFECTS_OTHERS = 8,
 };
+
 
 #endif //ifndef STATUS_INCLUDED

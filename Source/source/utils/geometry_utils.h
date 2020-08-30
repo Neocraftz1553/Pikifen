@@ -17,7 +17,6 @@
 #include <math.h>
 #include <string>
 
-using namespace std;
 
 /* ----------------------------------------------------------------------------
  * Simple 2D point.
@@ -57,29 +56,30 @@ struct point {
  * to LARGE_FLOAT if it is uncached.
  */
 struct dist {
+public:
+    dist(const point &p1, const point &p2);
+    dist(const float d = 0.0f);
+    dist &operator =(const float d);
+    bool operator <(const float d2) const;
+    bool operator <(const dist &d2) const;
+    bool operator <=(const float d2) const;
+    bool operator <=(const dist &d2) const;
+    bool operator >(const float d2) const;
+    bool operator >(const dist &d2) const;
+    bool operator >=(const float d2) const;
+    bool operator >=(const dist &d2) const;
+    bool operator ==(const float d2) const;
+    bool operator ==(const dist &d2) const;
+    bool operator !=(const float d2) const;
+    bool operator !=(const dist &d2) const;
+    void operator +=(const dist &d2);
+    float to_float();
+    
 private:
     float distance_squared;
     float normal_distance;
     bool has_normal_distance;
     
-public:
-    dist(const point &p1, const point &p2);
-    dist(const float d = 0.0f);
-    dist &operator =(const float d);
-    bool operator <(const float d2);
-    bool operator <(const dist &d2);
-    bool operator <=(const float d2);
-    bool operator <=(const dist &d2);
-    bool operator >(const float d2);
-    bool operator >(const dist &d2);
-    bool operator >=(const float d2);
-    bool operator >=(const dist &d2);
-    bool operator ==(const float d2);
-    bool operator ==(const dist &d2);
-    bool operator !=(const float d2);
-    bool operator !=(const dist &d2);
-    void operator +=(const dist &d2);
-    float to_float();
 };
 
 
@@ -104,6 +104,10 @@ bool circle_intersects_rectangle(
     const float rect_angle,
     float* overlap_dist = NULL, float* rectangle_side_angle = NULL
 );
+bool collinear_lines_intersect(
+    const point &a, const point &b, const point &c, const point &d,
+    point* intersection_tl = NULL, point* intersection_br = NULL
+);
 void coordinates_to_angle(
     const point &coordinates, float* angle, float* magnitude
 );
@@ -127,6 +131,9 @@ bool is_point_in_triangle(
     bool loq
 );
 float linear_dist_to_angular(const float linear_dist, const float radius);
+bool lines_are_collinear(
+    const point &a, const point &b, const point &c, const point &d
+);
 bool lines_intersect(
     const point &l1p1, const point &l1p2, const point &l2p1, const point &l2p2,
     float* ur, float* ul

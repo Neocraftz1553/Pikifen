@@ -19,31 +19,21 @@
 #include "../mob_types/pikmin_type.h"
 #include "mob.h"
 
-enum ONION_STATES {
-    ONION_STATE_IDLING,
-    
-    N_ONION_STATES,
-};
-
-const float ONION_FULL_SPEW_DELAY          = 2.5f;
-const float ONION_NEXT_SPEW_DELAY          = 0.10f;
-const unsigned char ONION_SEETHROUGH_ALPHA = 64;
-const float ONION_FADE_SPEED               = 255; //Values per second.
-
 
 /* ----------------------------------------------------------------------------
  * An Onion is where Pikmin are stored.
  */
 class onion : public mob {
-protected:
-    virtual void tick_class_specifics();
-    
 public:
+    //What type of Onion it is.
     onion_type* oni_type;
+    
+    //Is this Onion currently activated?
     bool activated;
     //How many Pikmin are inside, per maturity.
     size_t pikmin_inside[N_MATURITIES];
-    size_t spew_queue; //TODO this needs to be a proper queue (Master Onion).
+    //How many Pikmin are queued up to be spat.
+    size_t spew_queue;
     //Time left until it starts spewing queued seeds.
     timer full_spew_timer;
     //Time left until it spews the next seed in the queue.
@@ -53,13 +43,24 @@ public:
     //The Onion's alpha.
     unsigned char seethrough;
     
-    onion(const point &pos, onion_type* type, const float angle);
-    virtual void draw_mob(bitmap_effect_manager* effect_manager = NULL);
-    virtual void read_script_vars(const string &vars);
-    
+    //Call a Pikmin out.
     void call_pikmin();
+    //Spit a new seed.
     void spew();
+    //Store a Pikmin inside.
     void stow_pikmin();
+    
+    //Constructor.
+    onion(const point &pos, onion_type* type, const float angle);
+    //Mob drawing routine.
+    virtual void draw_mob();
+    //Read script variables from the area data.
+    virtual void read_script_vars(const script_var_reader &svr);
+    
+protected:
+    //Tick class-specific logic.
+    virtual void tick_class_specifics(const float delta_t);
 };
+
 
 #endif //ifndef ONION_INCLUDED

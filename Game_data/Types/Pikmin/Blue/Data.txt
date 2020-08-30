@@ -1,17 +1,14 @@
 name = Blue Pikmin
 
 can_carry_tools = true
-can_dig = no
-can_latch = yes
-can_swim = yes
 carry_speed = 4
 carry_strength = 1
-has_onion = yes
 health_regen = 10
 height = 24
 icon = Blue_Pikmin_icon.png
 main_color = 32 32 240
 max_health = 100
+max_throw_height = 260
 move_speed = 110
 pushable = true
 pushes = false

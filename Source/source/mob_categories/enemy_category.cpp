@@ -12,8 +12,8 @@
 
 #include "enemy_category.h"
 
+#include "../game.h"
 #include "../mobs/enemy.h"
-#include "../vars.h"
 
 
 /* ----------------------------------------------------------------------------
@@ -22,29 +22,38 @@
 enemy_category::enemy_category() :
     mob_category(
         MOB_CATEGORY_ENEMIES, "Enemy", "Enemies",
-        ENEMIES_FOLDER_PATH, al_map_rgb(224, 96, 128)
+        "Enemies", al_map_rgb(204, 71, 71)
     ) {
     
 }
 
 
 /* ----------------------------------------------------------------------------
- * Returns all types of enemy by name.
+ * Clears the list of registered types of enemy.
  */
-void enemy_category::get_type_names(vector<string> &list) {
-    for(auto t = enemy_types.begin(); t != enemy_types.end(); ++t) {
-        list.push_back(t->first);
+void enemy_category::clear_types() {
+    for(auto &t : game.mob_types.enemy) {
+        delete t.second;
     }
+    game.mob_types.enemy.clear();
 }
 
 
 /* ----------------------------------------------------------------------------
- * Returns a type of enemy given its name, or NULL on error.
+ * Creates an enemy and adds it to the list of enemies.
+ * pos:
+ *   Starting coordinates.
+ * type:
+ *   Mob type.
+ * angle:
+ *   Starting angle.
  */
-mob_type* enemy_category::get_type(const string &name) {
-    auto it = enemy_types.find(name);
-    if(it == enemy_types.end()) return NULL;
-    return it->second;
+mob* enemy_category::create_mob(
+    const point &pos, mob_type* type, const float angle
+) {
+    enemy* m = new enemy(pos, (enemy_type*) type, angle);
+    game.states.gameplay_st->mobs.enemies.push_back(m);
+    return m;
 }
 
 
@@ -57,44 +66,50 @@ mob_type* enemy_category::create_type() {
 
 
 /* ----------------------------------------------------------------------------
- * Registers a created type of enemy.
- */
-void enemy_category::register_type(mob_type* type) {
-    enemy_types[type->name] = (enemy_type*) type;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Creates an enemy and adds it to the list of enemies.
- */
-mob* enemy_category::create_mob(
-    const point &pos, mob_type* type, const float angle
-) {
-    enemy* m = new enemy(pos, (enemy_type*) type, angle);
-    enemies.push_back(m);
-    return m;
-}
-
-
-/* ----------------------------------------------------------------------------
  * Clears an enemy from the list of enemies.
+ * m:
+ *   The mob to erase.
  */
 void enemy_category::erase_mob(mob* m) {
-    enemies.erase(
-        find(enemies.begin(), enemies.end(), (enemy*) m)
+    game.states.gameplay_st->mobs.enemies.erase(
+        find(
+        game.states.gameplay_st->mobs.enemies.begin(),
+        game.states.gameplay_st->mobs.enemies.end(),
+        (enemy*) m
+        )
     );
 }
 
 
 /* ----------------------------------------------------------------------------
- * Clears the list of registered types of enemy.
+ * Returns a type of enemy given its name, or NULL on error.
+ * name:
+ *   Name of the mob type to get.
  */
-void enemy_category::clear_types() {
-    for(auto t = enemy_types.begin(); t != enemy_types.end(); ++t) {
-        delete t->second;
-    }
-    enemy_types.clear();
+mob_type* enemy_category::get_type(const string &name) const {
+    auto it = game.mob_types.enemy.find(name);
+    if(it == game.mob_types.enemy.end()) return NULL;
+    return it->second;
 }
 
 
-enemy_category::~enemy_category() { }
+/* ----------------------------------------------------------------------------
+ * Returns all types of enemy by name.
+ * list:
+ *   This list gets filled with the mob type names.
+ */
+void enemy_category::get_type_names(vector<string> &list) const {
+    for(auto &t : game.mob_types.enemy) {
+        list.push_back(t.first);
+    }
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Registers a created type of enemy.
+ * type:
+ *   Mob type to register.
+ */
+void enemy_category::register_type(mob_type* type) {
+    game.mob_types.enemy[type->name] = (enemy_type*) type;
+}

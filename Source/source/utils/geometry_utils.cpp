@@ -10,13 +10,209 @@
  */
 
 #include <algorithm>
+#include <math.h>
 
 #include "geometry_utils.h"
 #include "math_utils.h"
 
 
 /* ----------------------------------------------------------------------------
+ * Creates a new distance number, given two points.
+ * p1:
+ *   First point.
+ * p2:
+ *   Second point.
+ */
+dist::dist(const point &p1, const point &p2) :
+    distance_squared(
+        (p2.x - p1.x) * (p2.x - p1.x) +
+        (p2.y - p1.y) * (p2.y - p1.y)
+    ),
+    normal_distance(0),
+    has_normal_distance(false) {
+    
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Creates a new distance number, given a non-squared distance.
+ * d:
+ *   Regular, non-squared distance.
+ */
+dist::dist(const float d) :
+    distance_squared(d * d),
+    normal_distance(d),
+    has_normal_distance(true) {
+    
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Sets the value given a non-squared distance.
+ * d:
+ *   Regular, non-squared distance.
+ */
+dist &dist::operator =(const float d) {
+    distance_squared = d * d;
+    normal_distance = d;
+    has_normal_distance = true;
+    return *this;
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Checks if this distance is smaller than the specified one.
+ * d2:
+ *   Regular, non-squared distance to check.
+ */
+bool dist::operator<(const float d2) const {
+    return distance_squared < (d2 * d2);
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Checks if this distance is larger than the specified one.
+ * d2:
+ *   Regular, non-squared distance to check.
+ */
+bool dist::operator>(const float d2) const {
+    return distance_squared > (d2 * d2);
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Checks if this distance is the same as the specified one.
+ * d2:
+ *   Regular, non-squared distance to check.
+ */
+bool dist::operator==(const float d2) const {
+    return distance_squared == (d2 * d2);
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Checks if this distance is smaller than or equal to the specified one.
+ * d2:
+ *   Regular, non-squared distance to check.
+ */
+bool dist::operator<=(const float d2) const {
+    return !operator>(d2);
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Checks if this distance is larger than or equal to the specified one.
+ * d2:
+ *   Regular, non-squared distance to check.
+ */
+bool dist::operator>=(const float d2) const {
+    return !operator<(d2);
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Checks if this distance is different from the specified one.
+ * d2:
+ *   Regular, non-squared distance to check.
+ */
+bool dist::operator!=(const float d2) const {
+    return !operator==(d2);
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Checks if this distance is smaller than the specified one.
+ * d2:
+ *   Distance object to check.
+ */
+bool dist::operator<(const dist &d2) const {
+    return distance_squared < d2.distance_squared;
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Checks if this distance is larger than the specified one.
+ * d2:
+ *   Distance object to check.
+ */
+bool dist::operator>(const dist &d2) const {
+    return distance_squared > d2.distance_squared;
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Checks if this distance is the same as the specified one.
+ * d2:
+ *   Distance object to check.
+ */
+bool dist::operator==(const dist &d2) const {
+    return distance_squared == d2.distance_squared;
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Checks if this distance is smaller than or equal to the specified one.
+ * d2:
+ *   Distance object to check.
+ */
+bool dist::operator<=(const dist &d2) const {
+    return !operator>(d2);
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Checks if this distance is larger than or equal to the specified one.
+ * d2:
+ *   Distance object to check.
+ */
+bool dist::operator>=(const dist &d2) const {
+    return !operator<(d2);
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Checks if this distance is different from the specified one.
+ * d2:
+ *   Distance object to check.
+ */
+bool dist::operator!=(const dist &d2) const {
+    return !operator==(d2);
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Adds some distance to the current one.
+ * d2:
+ *   Amount of distance to add.
+ */
+void dist::operator+=(const dist &d2) {
+    distance_squared += d2.distance_squared;
+    if(has_normal_distance && d2.has_normal_distance) {
+        normal_distance += d2.normal_distance;
+    } else {
+        has_normal_distance = false;
+    }
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Returns the regular, non-squared distance as a number.
+ */
+float dist::to_float() {
+    if(!has_normal_distance) {
+        normal_distance = sqrt(distance_squared);
+        has_normal_distance = true;
+    }
+    return normal_distance;
+}
+
+
+/* ----------------------------------------------------------------------------
  * Constructs a point, given its coordinates.
+ * x:
+ *   X coordinate.
+ * y:
+ *   Y coordinate.
  */
 point::point(const float x, const float y) :
     x(x),
@@ -37,6 +233,8 @@ point::point() :
 
 /* ----------------------------------------------------------------------------
  * Adds the coordinates of two points.
+ * p:
+ *   Point with values to add with.
  */
 const point point::operator +(const point &p) const {
     return point(x + p.x, y + p.y);
@@ -45,6 +243,8 @@ const point point::operator +(const point &p) const {
 
 /* ----------------------------------------------------------------------------
  * Subtracts the coordinates of two points.
+ * p:
+ *   Point with values to subtract with.
  */
 const point point::operator -(const point &p) const {
     return point(x - p.x, y - p.y);
@@ -53,6 +253,8 @@ const point point::operator -(const point &p) const {
 
 /* ----------------------------------------------------------------------------
  * Multiplies the coordinates of two points.
+ * p:
+ *   Point with values to multiply with.
  */
 const point point::operator *(const point &p) const {
     return point(x * p.x, y * p.y);
@@ -61,6 +263,8 @@ const point point::operator *(const point &p) const {
 
 /* ----------------------------------------------------------------------------
  * Divides the coordinates of two points.
+ * p:
+ *   Point with values to divide with.
  */
 const point point::operator /(const point &p) const {
     return point(x / p.x, y / p.y);
@@ -69,6 +273,8 @@ const point point::operator /(const point &p) const {
 
 /* ----------------------------------------------------------------------------
  * Adds a number to the coordinates.
+ * n:
+ *   Number to add to both coordinates.
  */
 const point point::operator +(const float n) const {
     return point(x + n, y + n);
@@ -77,6 +283,8 @@ const point point::operator +(const float n) const {
 
 /* ----------------------------------------------------------------------------
  * Subtracts a number from each coordinates.
+ * n:
+ *   Number to subtract from both coordinates.
  */
 const point point::operator -(const float n) const {
     return point(x - n, y - n);
@@ -85,6 +293,8 @@ const point point::operator -(const float n) const {
 
 /* ----------------------------------------------------------------------------
  * Divides the coordinates by a number.
+ * n:
+ *   Number to divide both coordinates with.
  */
 const point point::operator /(const float n) const {
     return point(x / n, y / n);
@@ -93,6 +303,8 @@ const point point::operator /(const float n) const {
 
 /* ----------------------------------------------------------------------------
  * Adds the coordinates of another point to this one's.
+ * p:
+ *   Point with the values to add with.
  */
 point point::operator +=(const point &p) {
     x += p.x;
@@ -103,6 +315,8 @@ point point::operator +=(const point &p) {
 
 /* ----------------------------------------------------------------------------
  * Subtracts the coordinates of another point to this one's.
+ * p:
+ *   Point with the values to subtract with.
  */
 point point::operator -=(const point &p) {
     x -= p.x;
@@ -113,6 +327,8 @@ point point::operator -=(const point &p) {
 
 /* ----------------------------------------------------------------------------
  * Adds a given number to the coordinates.
+ * n:
+ *   Value to add to both coordinates with.
  */
 point point::operator +=(const float n) {
     x += n;
@@ -123,6 +339,8 @@ point point::operator +=(const float n) {
 
 /* ----------------------------------------------------------------------------
  * Multiplies the coordinates by a given number.
+ * n:
+ *   Value to multiply both coordinates with.
  */
 point point::operator *=(const float n) {
     x *= n;
@@ -133,6 +351,8 @@ point point::operator *=(const float n) {
 
 /* ----------------------------------------------------------------------------
  * Compares if two points are the same.
+ * p:
+ *   Other point to compare against.
  */
 const bool point::operator ==(const point &p) const {
     return x == p.x && y == p.y;
@@ -141,6 +361,8 @@ const bool point::operator ==(const point &p) const {
 
 /* ----------------------------------------------------------------------------
  * Compares if two points are different.
+ * p:
+ *   Other point to compare against.
  */
 const bool point::operator !=(const point &p) const {
     return x != p.x || y != p.y;
@@ -149,6 +371,8 @@ const bool point::operator !=(const point &p) const {
 
 /* ----------------------------------------------------------------------------
  * Multiplies the coordinates by a number.
+ * m:
+ *   Value to multiply both coordinates with.
  */
 const point point::operator *(const float m) const {
     return point(x * m, y * m);
@@ -157,102 +381,11 @@ const point point::operator *(const float m) const {
 
 
 /* ----------------------------------------------------------------------------
- * Creates a new distance number, given two points.
- */
-dist::dist(const point &p1, const point &p2) :
-    distance_squared(
-        (p2.x - p1.x) * (p2.x - p1.x) +
-        (p2.y - p1.y) * (p2.y - p1.y)
-    ),
-    normal_distance(0),
-    has_normal_distance(false) {
-    
-}
-
-
-/* ----------------------------------------------------------------------------
- * Creates a new distance number, given a non-squared distance.
- */
-dist::dist(const float d) :
-    distance_squared(d * d),
-    normal_distance(d),
-    has_normal_distance(true) {
-    
-}
-
-
-/* ----------------------------------------------------------------------------
- * Returns the regular distance as a number.
- */
-float dist::to_float() {
-    if(!has_normal_distance) {
-        normal_distance = sqrt(distance_squared);
-        has_normal_distance = true;
-    }
-    return normal_distance;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Distance comparisons and plain operations.
- */
-dist &dist::operator =(const float d) {
-    distance_squared = d * d;
-    normal_distance = d;
-    has_normal_distance = true;
-    return *this;
-}
-bool dist::operator<(const float d2) {
-    return distance_squared < (d2 * d2);
-}
-bool dist::operator>(const float d2) {
-    return distance_squared > (d2 * d2);
-}
-bool dist::operator==(const float d2) {
-    return distance_squared == (d2 * d2);
-}
-bool dist::operator<=(const float d2) {
-    return !operator>(d2);
-}
-bool dist::operator>=(const float d2) {
-    return !operator<(d2);
-}
-bool dist::operator!=(const float d2) {
-    return !operator==(d2);
-}
-bool dist::operator<(const dist &d2) {
-    return distance_squared < d2.distance_squared;
-}
-bool dist::operator>(const dist &d2) {
-    return distance_squared > d2.distance_squared;
-}
-bool dist::operator==(const dist &d2) {
-    return distance_squared == d2.distance_squared;
-}
-bool dist::operator<=(const dist &d2) {
-    return !operator>(d2);
-}
-bool dist::operator>=(const dist &d2) {
-    return !operator<(d2);
-}
-bool dist::operator!=(const dist &d2) {
-    return !operator==(d2);
-}
-void dist::operator+=(const dist &d2) {
-    distance_squared += d2.distance_squared;
-    if(has_normal_distance && d2.has_normal_distance) {
-        normal_distance += d2.normal_distance;
-    } else {
-        has_normal_distance = false;
-    }
-}
-
-
-
-/* ----------------------------------------------------------------------------
  * Returns the vector coordinates of an angle.
- * angle:     The angle.
- * magnitude: Its magnitude.
+ * angle:
+ *   The angle.
+ * magnitude:
+ *   Its magnitude.
  */
 point angle_to_coordinates(
     const float angle, const float magnitude
@@ -263,6 +396,10 @@ point angle_to_coordinates(
 
 /* ----------------------------------------------------------------------------
  * Converts angular distance to linear distance.
+ * angular_dist:
+ *   Angular distance value.
+ * radius:
+ *   Radius of the circle.
  */
 float angular_dist_to_linear(const float angular_dist, const float radius) {
     return 2 * radius * tan(angular_dist / 2);
@@ -271,9 +408,12 @@ float angular_dist_to_linear(const float angular_dist, const float radius) {
 
 /* ----------------------------------------------------------------------------
  * Checks if two spheres are colliding via a bounding-box check.
- * center1: Coordinates of the first sphere.
- * center2: Coordinates of the second sphere.
- * r:       Range of the bounding box.
+ * center1:
+ *   Coordinates of the first sphere.
+ * center2:
+ *   Coordinates of the second sphere.
+ * r:
+ *   Range of the bounding box.
  */
 bool bbox_check(const point &center1, const point &center2, const float r) {
     return
@@ -286,10 +426,14 @@ bool bbox_check(const point &center1, const point &center2, const float r) {
 
 /* ----------------------------------------------------------------------------
  * Checks if a rectangle and a sphere are colliding via a bounding-box check.
- * tl1:     Top-left coordinates of the rectangle.
- * br1:     Bottom-right coordinates of the rectangle.
- * center2: Coordinates of the sphere.
- * r:       Radius of the sphere.
+ * tl1:
+ *   Top-left coordinates of the rectangle.
+ * br1:
+ *   Bottom-right coordinates of the rectangle.
+ * center2:
+ *   Coordinates of the sphere.
+ * r:
+ *   Radius of the sphere.
  */
 bool bbox_check(
     const point &tl1, const point &br1,
@@ -305,10 +449,18 @@ bool bbox_check(
 
 /* ----------------------------------------------------------------------------
  * Returns whether a circle is touching a line segment or not.
- * circle: Coordinates of the circle.
- * radius: Radius of the circle.
- * line_*: Coordinates of the line.
- * li*:    If not NULL, the line intersection coordinates are returned here.
+ * circle:
+ *   Coordinates of the circle.
+ * radius:
+ *   Radius of the circle.
+ * line_p1:
+ *   Starting point of the line segment.
+ * line_p2:
+ *   Ending point of the line segment.
+ * lix:
+ *   If not NULL, the line intersection's X coordinate is returned here.
+ * liy:
+ *   If not NULL, the line intersection's Y coordinate is returned here.
  */
 bool circle_intersects_line(
     const point &circle, const float radius,
@@ -338,10 +490,10 @@ bool circle_intersects_line(
             float y = line_p1.y + (i * vy * t);
             //If one of them is in the boundaries of the segment, it collides
             if (
-                x >= min(line_p1.x, line_p2.x) &&
-                x <= max(line_p1.x, line_p2.x) &&
-                y >= min(line_p1.y, line_p2.y) &&
-                y <= max(line_p1.y, line_p2.y)
+                x >= std::min(line_p1.x, line_p2.x) &&
+                x <= std::max(line_p1.x, line_p2.x) &&
+                y >= std::min(line_p1.y, line_p2.y) &&
+                y <= std::max(line_p1.y, line_p2.y)
             ) {
                 if(lix) *lix = x;
                 if(liy) *liy = y;
@@ -356,13 +508,20 @@ bool circle_intersects_line(
 /* ----------------------------------------------------------------------------
  * Returns whether a circle is touching a rotated rectangle or not.
  * This includes being completely inside the rectangle.
- * circle:               Coordinates of the circle.
- * radius:               Radius of the circle.
- * rectangle:            Central coordinates of the rectangle.
- * rect_dim:             Dimensions of the rectangle.
- * rect_angle:           Angle the rectangle is facing.
- * overlap_dist:         If not NULL, the amount of overlap is returned here.
- * rectangle_side_angle: If not NULL, the angle of the side of the rectangle
+ * circle:
+ *   Coordinates of the circle.
+ * radius:
+ *   Radius of the circle.
+ * rectangle:
+ *   Central coordinates of the rectangle.
+ * rect_dim:
+ *   Dimensions of the rectangle.
+ * rect_angle:
+ *   Angle the rectangle is facing.
+ * overlap_dist:
+ *   If not NULL, the amount of overlap is returned here.
+ * rectangle_side_angle:
+ *   If not NULL, the angle of the side of the rectangle
  *   that the circle is on, aligned to the sides of the rectangle, is
  *   returned here.
  */
@@ -392,9 +551,9 @@ bool circle_intersects_rectangle(
             -(-rect_dim.x / 2.0 - circle_rel_pos.x),
             -(-rect_dim.y / 2.0 - circle_rel_pos.y)
         );
-        float smallest_x = min(dist_to_neg.x, dist_to_pos.x);
-        float smallest_y = min(dist_to_neg.y, dist_to_pos.y);
-        float smallest = min(smallest_x, smallest_y);
+        float smallest_x = std::min(dist_to_neg.x, dist_to_pos.x);
+        float smallest_y = std::min(dist_to_neg.y, dist_to_pos.y);
+        float smallest = std::min(smallest_x, smallest_y);
         
         if(smallest == dist_to_pos.x) {
             nearest = point(rect_dim.x / 2, circle_rel_pos.y);
@@ -443,10 +602,58 @@ bool circle_intersects_rectangle(
 
 
 /* ----------------------------------------------------------------------------
+ * Returns whether the two line segments, which are known to be collinear,
+ * are intersecting.
+ * a:
+ *   Starting point of the first line segment.
+ * b:
+ *   Ending point of the first line segment.
+ * c:
+ *   Starting point of the second line segment.
+ * d:
+ *   Ending point of the second line segment.
+ * intersection_tl:
+ *   If not NULL, and if there is an intersection, return the top-left
+ *   corner of the intersection here.
+ * intersection_br:
+ *   If not NULL, and if there is an intersection, return the bottom-right
+ *   corner of the intersection here.
+ */
+bool collinear_lines_intersect(
+    const point &a, const point &b, const point &c, const point &d,
+    point* intersection_tl, point* intersection_br
+) {
+    point min1(std::min(a.x, b.x), std::min(a.y, b.y));
+    point max1(std::max(a.x, b.x), std::max(a.y, b.y));
+    point min2(std::min(c.x, d.x), std::min(c.y, d.y));
+    point max2(std::max(c.x, d.x), std::max(c.y, d.y));
+    
+    point i_tl(std::max(min1.x, min2.x), std::max(min1.y, min2.y));
+    point i_br(std::min(max1.x, max2.x), std::min(max1.y, max2.y));
+    
+    if(i_tl.x == i_br.x && i_tl.y == i_br.y) {
+        //Special case -- they share just one point. Let it slide.
+        return false;
+    }
+    
+    if(i_tl.x <= i_br.x && i_tl.y <= i_br.y) {
+        if(intersection_tl) *intersection_tl = i_tl;
+        if(intersection_br) *intersection_br = i_br;
+        return true;
+    }
+    
+    return false;
+}
+
+
+/* ----------------------------------------------------------------------------
  * Returns the angle and magnitude of vector coordinates.
- * coordinates: The coordinates.
- * angle:       Variable to return the angle to.
- * magnitude:   Variable to return the magnitude to.
+ * coordinates:
+ *   The coordinates.
+ * angle:
+ *   Variable to return the angle to.
+ * magnitude:
+ *   Variable to return the magnitude to.
  */
 void coordinates_to_angle(
     const point &coordinates, float* angle, float* magnitude
@@ -462,6 +669,8 @@ void coordinates_to_angle(
 
 /* ----------------------------------------------------------------------------
  * Converts an angle from degrees to radians.
+ * deg:
+ *   Angle, in degrees.
  */
 float deg_to_rad(const float deg) {
     return (M_PI / 180.0f) * deg;
@@ -472,6 +681,10 @@ float deg_to_rad(const float deg) {
  * Returns the angle between two points.
  * In other words, this is the angle "center" is facing when it is looking
  * at "focus".
+ * center:
+ *   Center point.
+ * focus:
+ *   Point that the center is focusing on.
  */
 float get_angle(const point &center, const point &focus) {
     return atan2(focus.y - center.y, focus.x - center.x);
@@ -480,6 +693,10 @@ float get_angle(const point &center, const point &focus) {
 
 /* ----------------------------------------------------------------------------
  * Returns the clockwise distance between a1 and a2, in radians.
+ * a1:
+ *   First angle.
+ * a2:
+ *   Second angle.
  */
 float get_angle_cw_dif(float a1, float a2) {
     a1 = normalize_angle(a1);
@@ -491,17 +708,29 @@ float get_angle_cw_dif(float a1, float a2) {
 
 /* ----------------------------------------------------------------------------
  * Returns the smallest distance between two angles.
+ * a1:
+ *   First angle.
+ * a2:
+ *   Second angle.
  */
 float get_angle_smallest_dif(const float a1, const float a2) {
-    return M_PI - abs(abs(normalize_angle(a1) - normalize_angle(a2)) - M_PI);
+    return
+        M_PI - std::abs(
+            std::abs(normalize_angle(a1) - normalize_angle(a2)) - M_PI
+        );
 }
 
 
 /* ----------------------------------------------------------------------------
  * Returns the closest point in a line to a given point.
- *   l1, l2:      Points of the line.
- * p:             Reference point.
- * segment_ratio: If not NULL, the ratio from l1 to l2 is returned here.
+ * l1:
+ *   Starting point of the line segment.
+ * l2:
+ *   Ending point of the line segment.
+ * p:
+ *   Reference point.
+ * segment_ratio:
+ *   If not NULL, the ratio from l1 to l2 is returned here.
  *   Between 0 and 1, it belongs to the line segment. If not, it doesn't.
  */
 point get_closest_point_in_line(
@@ -532,6 +761,12 @@ point get_closest_point_in_line(
 /* ----------------------------------------------------------------------------
  * Returns a point's sign on a line segment,
  * used for detecting if it's inside a triangle.
+ * p:
+ *   The point to check.
+ * lp1:
+ *   Starting point of the line segment.
+ * lp2:
+ *   Ending point of the line segment.
  */
 float get_point_sign(const point &p, const point &lp1, const point &lp2) {
     return (p.x - lp2.x) * (lp1.y - lp2.y) - (lp1.x - lp2.x) * (p.y - lp2.y);
@@ -542,6 +777,16 @@ float get_point_sign(const point &p, const point &lp1, const point &lp2) {
  * Gets the bounding box coordinates of a rectangle that has undergone
  * translation, scale, and/or rotation transformations, and places it
  * in the specified point structs.
+ * center:
+ *   Center point of the rectangle.
+ * dimensions:
+ *   The rectangle's width and height.
+ * angle:
+ *   Angle of rotation.
+ * min_coords:
+ *   The top-left coordinates are returned here.
+ * max_coords:
+ *   The bottom-right coordinates are returned here.
  */
 void get_transformed_rectangle_bounding_box(
     const point &center, const point &dimensions, const float angle,
@@ -588,20 +833,26 @@ void get_transformed_rectangle_bounding_box(
 
 /* ----------------------------------------------------------------------------
  * Returns whether a point is inside a triangle or not.
- * p:      The point to check.
- * tp*:    Coordinates of the triangle's points.
- * loq:    Less or equal.
+ * p:
+ *   The point to check.
+ * tp1:
+ *   First point of the triangle.
+ * tp2:
+ *   Second point of the triangle.
+ * tp3:
+ *   Third point of the triangle.
+ * loq:
+ *   If true, use a "less or equal" comparison.
  *   Different code requires different precision for on-line cases.
  *   Just...don't overthink this, I added this based on what worked and didn't.
- * Thanks go to
- *   http://stackoverflow.com/questions/2049582/
- *   how-to-determine-a-point-in-a-triangle
  */
 bool is_point_in_triangle(
     const point &p, const point &tp1, const point &tp2, const point &tp3,
     const bool loq
 ) {
 
+    //https://stackoverflow.com/q/2049582
+    
     bool b1, b2, b3;
     
     float f1, f2, f3;
@@ -626,6 +877,10 @@ bool is_point_in_triangle(
 
 /* ----------------------------------------------------------------------------
  * Converts linear distance to angular distance.
+ * linear_dist:
+ *   Linear distance.
+ * radius:
+ *   Radius of the circle.
  */
 float linear_dist_to_angular(const float linear_dist, const float radius) {
     return 2 * atan(linear_dist / (2 * radius));
@@ -633,12 +888,64 @@ float linear_dist_to_angular(const float linear_dist, const float radius) {
 
 
 /* ----------------------------------------------------------------------------
+ * Returns whether the two line segments are collinear.
+ * a:
+ *   Starting point of the first line segment.
+ * b:
+ *   Ending point of the first line segment.
+ * c:
+ *   Starting point of the second line segment.
+ * d:
+ *   Ending point of the second line segment.
+ */
+bool lines_are_collinear(
+    const point &a, const point &b, const point &c, const point &d
+) {
+    //Special case: vertical lines. This is because we can't divide by zero.
+    if(a.x == b.x) {
+        return (a.x == c.x && a.x == d.x);
+    }
+    
+    //Check the slopes of AB, AC, AD, BC, BD, and CD.
+    //If one of them differs, they are not collinear.
+    float slope = fabs(a.y - b.y) / fabs(a.x - b.x);
+    
+    if(a.x != c.x) {
+        if(fabs(a.y - c.y) / fabs(a.x - c.x) != slope) return false;
+    }
+    if(a.x != d.x) {
+        if(fabs(a.y - d.y) / fabs(a.x - d.x) != slope) return false;
+    }
+    if(b.x != c.x) {
+        if(fabs(b.y - c.y) / fabs(b.x - c.x) != slope) return false;
+    }
+    if(b.x != d.x) {
+        if(fabs(b.y - d.y) / fabs(b.x - d.x) != slope) return false;
+    }
+    if(c.x != d.x) {
+        if(fabs(c.y - d.y) / fabs(c.x - d.x) != slope) return false;
+    }
+    return true;
+}
+
+
+/* ----------------------------------------------------------------------------
  * Returns whether the two line segments intersect.
- * ur: Returns the distance from the start of line 2 in which
+ * l1p1:
+ *   Starting point of the first line segment.
+ * l1p2:
+ *   Ending point of the first line segment.
+ * l2p1:
+ *   Starting point of the second line segment.
+ * l2p2:
+ *   Ending point of the second line segment.
+ * ur:
+ *   Returns the distance from the start of line 2 in which
  *   the intersection happens.
  *   This is a ratio, so 0 is the start, 1 is the end of the line.
  *   Oh, and the r stands for ray.
- * ul: Same as ur, but for line 1.
+ * ul:
+ *   Same as ur, but for line 1.
  */
 bool lines_intersect(
     const point &l1p1, const point &l1p2, const point &l2p1, const point &l2p2,
@@ -683,7 +990,16 @@ bool lines_intersect(
 
 /* ----------------------------------------------------------------------------
  * Returns whether the two line segments intersect.
- * insersection: Return the intersection point here, if not NULL.
+ * l1p1:
+ *   Starting point of the first line segment.
+ * l1p2:
+ *   Ending point of the first line segment.
+ * l2p1:
+ *   Starting point of the second line segment.
+ * l2p2:
+ *   Ending point of the second line segment.
+ * intersection:
+ *   Return the intersection point here, if not NULL.
  */
 bool lines_intersect(
     const point &l1p1, const point &l1p2, const point &l2p1, const point &l2p2,
@@ -705,15 +1021,23 @@ bool lines_intersect(
 
 /* ----------------------------------------------------------------------------
  * Returns the movement necessary to move a point.
- * start:        Coordinates of the initial point.
- * target:       Coordinates of the target point.
- * speed:        Speed at which the point can move.
- * reach_radius: If the point is within this range of the target,
+ * start:
+ *   Coordinates of the initial point.
+ * target:
+ *   Coordinates of the target point.
+ * speed:
+ *   Speed at which the point can move.
+ * reach_radius:
+ *   If the point is within this range of the target,
  *   consider it as already being there.
- * mov:          Variable to return the amount of movement to.
- * angle:        Variable to return the angle the point faces to.
- * reached:      Variable to return whether the point reached the target.
- * delta_t:      Duration of the current tick.
+ * mov:
+ *   Variable to return the amount of movement to.
+ * angle:
+ *   Variable to return the angle the point faces to.
+ * reached:
+ *   Variable to return whether the point reached the target.
+ * delta_t:
+ *   Duration of the current tick.
  */
 void move_point(
     const point &start, const point &target,
@@ -725,7 +1049,7 @@ void move_point(
     
     if(dis > reach_radius) {
         float move_amount =
-            min((double) (dis / delta_t / 2.0f), (double) speed);
+            std::min((double) (dis / delta_t / 2.0f), (double) speed);
             
         dif *= (move_amount / dis);
         
@@ -743,6 +1067,8 @@ void move_point(
 
 /* ----------------------------------------------------------------------------
  * Normalizes an angle so that it's between 0 and TAU (M_PI * 2).
+ * a:
+ *   Angle to normalize.
  */
 float normalize_angle(float a) {
     a = fmod(a, (float) TAU);
@@ -753,6 +1079,8 @@ float normalize_angle(float a) {
 
 /* ----------------------------------------------------------------------------
  * Converts an angle from radians to degrees.
+ * rad:
+ *   Angle, in radians.
  */
 float rad_to_deg(const float rad) {
     return (180.0f / M_PI) * rad;
@@ -762,8 +1090,14 @@ float rad_to_deg(const float rad) {
 /* ----------------------------------------------------------------------------
  * Returns whether a rectangle intersects with a line segment.
  * Also returns true if the line is fully inside the rectangle.
- * r*: Rectangle coordinates.
- * l*: Line coordinates.
+ * r1:
+ *   Top-left corner of the rectangle.
+ * r2:
+ *   Bottom-right corner of the rectangle.
+ * l1:
+ *   Starting point of the line segment.
+ * l2:
+ *   Ending point of the line segment.
  */
 bool rectangle_intersects_line(
     const point &r1, const point &r2,
@@ -819,10 +1153,14 @@ bool rectangle_intersects_line(
 
 /* ----------------------------------------------------------------------------
  * Checks if two rectangles are colliding.
- * tl1: Coordinates of the first box's top-left.
- * br1: Coordinates of the first box's bottom-right.
- * tl2: Coordinates of the second box's top-left.
- * br2: Coordinates of the second box's bottom-right.
+ * tl1:
+ *   Coordinates of the first box's top-left.
+ * br1:
+ *   Coordinates of the first box's bottom-right.
+ * tl2:
+ *   Coordinates of the second box's top-left.
+ * br2:
+ *   Coordinates of the second box's bottom-right.
  */
 bool rectangles_intersect(
     const point &tl1, const point &br1,
@@ -840,6 +1178,10 @@ bool rectangles_intersect(
  * Rotates a point by an angle.
  * The x and y are meant to represent the difference
  * between the point and the center of the rotation.
+ * coords:
+ *   Coordinates to rotate.
+ * angle:
+ *   Angle to rotate by.
  */
 point rotate_point(const point &coords, const float angle) {
     float c = cos(angle);

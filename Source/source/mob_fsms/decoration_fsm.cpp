@@ -15,24 +15,27 @@
 #include "../utils/string_utils.h"
 #include "gen_mob_fsm.h"
 
+
 /* ----------------------------------------------------------------------------
  * Creates the finite state machine for the decoration's logic.
+ * typ:
+ *   Mob type to create the finite state machine for.
  */
 void decoration_fsm::create_fsm(mob_type* typ) {
     easy_fsm_creator efc;
     efc.new_state("idling", DECORATION_STATE_IDLING); {
-        efc.new_event(MOB_EVENT_ON_ENTER); {
+        efc.new_event(MOB_EV_ON_ENTER); {
             efc.run(decoration_fsm::become_idle);
         }
-        efc.new_event(MOB_EVENT_TOUCHED_OBJECT); {
+        efc.new_event(MOB_EV_TOUCHED_OBJECT); {
             efc.run(decoration_fsm::check_bump);
         }
     }
     efc.new_state("bumped", DECORATION_STATE_BUMPED); {
-        efc.new_event(MOB_EVENT_ON_ENTER); {
+        efc.new_event(MOB_EV_ON_ENTER); {
             efc.run(decoration_fsm::be_bumped);
         }
-        efc.new_event(MOB_EVENT_ANIMATION_END); {
+        efc.new_event(MOB_EV_ANIMATION_END); {
             efc.change_state("idling");
         }
     }
@@ -51,7 +54,27 @@ void decoration_fsm::create_fsm(mob_type* typ) {
 
 
 /* ----------------------------------------------------------------------------
+ * When the decoration gets bumped.
+ * m:
+ *   The mob.
+ * info1:
+ *   Unused.
+ * info2:
+ *   Unused.
+ */
+void decoration_fsm::be_bumped(mob* m, void* info1, void* info2) {
+    m->set_animation(DECORATION_ANIM_BUMPED);
+}
+
+
+/* ----------------------------------------------------------------------------
  * When the decoration becomes idle.
+ * m:
+ *   The mob.
+ * info1:
+ *   Unused.
+ * info2:
+ *   Unused.
  */
 void decoration_fsm::become_idle(mob* m, void* info1, void* info2) {
     decoration* dec_ptr = (decoration*) m;
@@ -67,20 +90,20 @@ void decoration_fsm::become_idle(mob* m, void* info1, void* info2) {
 
 
 /* ----------------------------------------------------------------------------
- * When the decoration gets bumped.
- */
-void decoration_fsm::be_bumped(mob* m, void* info1, void* info2) {
-    m->set_animation(DECORATION_ANIM_BUMPED);
-}
-
-
-/* ----------------------------------------------------------------------------
  * Check if the decoration should really get bumped.
- * info1: Pointer to the mob that touched it.
+ * m:
+ *   The mob.
+ * info1:
+ *   Pointer to the mob that touched it.
+ * info2:
+ *   Unused.
  */
 void decoration_fsm::check_bump(mob* m, void* info1, void* info2) {
     mob* toucher = (mob*) info1;
-    if(toucher->speed.x == 0 && toucher->speed.y == 0 && !toucher->chasing) {
+    if(
+        toucher->speed.x == 0 && toucher->speed.y == 0 &&
+        !toucher->chase_info.is_chasing
+    ) {
         //Is the other object not currently moving? Let's not get bumped.
         return;
     }

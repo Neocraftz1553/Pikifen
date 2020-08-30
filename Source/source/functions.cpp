@@ -26,17 +26,44 @@
 
 #include "functions.h"
 
-#include "backtrace.h"
 #include "const.h"
 #include "drawing.h"
-#include "editors/animation_editor/editor.h"
+#include "game.h"
 #include "init.h"
 #include "menus.h"
+#include "utils/backtrace.h"
 #include "utils/string_utils.h"
-#include "vars.h"
+
+
+/* ----------------------------------------------------------------------------
+ * Calls al_fwrite, but with an std::string instead of a c-string.
+ * f:
+ *   Allegro file.
+ * s:
+ *   String to write.
+ */
+void al_fwrite(ALLEGRO_FILE* f, string s) {
+    al_fwrite(f, s.c_str(), s.size());
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Converts a color to its string representation.
+ * c:
+ *   Color to convert.
+ */
+string c2s(const ALLEGRO_COLOR &c) {
+    return i2s(c.r * 255) + " " + i2s(c.g * 255) + " " + i2s(c.b * 255) +
+           (c.a == 1 ? "" : " " + i2s(c.a * 255));
+}
+
 
 /* ----------------------------------------------------------------------------
  * Does sector s1 cast a shadow onto sector s2?
+ * s1:
+ *   Sector that would cast a shadow.
+ * s2:
+ *   Sector that would have the shadow cast onto it.
  */
 bool casts_shadow(sector* s1, sector* s2) {
     if(!s1 || !s2) return false;
@@ -50,8 +77,10 @@ bool casts_shadow(sector* s1, sector* s2) {
 
 /* ----------------------------------------------------------------------------
  * Returns the color that was provided, but with the alpha changed.
- * color: The color to change the alpha on.
- * a:     The new alpha, [0-255].
+ * c:
+ *   The color to change the alpha on.
+ * a:
+ *   The new alpha, [0-255].
  */
 ALLEGRO_COLOR change_alpha(const ALLEGRO_COLOR &c, const unsigned char a) {
     ALLEGRO_COLOR c2;
@@ -63,8 +92,10 @@ ALLEGRO_COLOR change_alpha(const ALLEGRO_COLOR &c, const unsigned char a) {
 
 /* ----------------------------------------------------------------------------
  * Returns the color provided, but darker or lighter by l amount.
- * color: The color to change the lighting on.
- * l:     Lighting amount, positive or negative.
+ * c:
+ *   The color to change the lighting on.
+ * l:
+ *   Lighting amount, positive or negative.
  */
 ALLEGRO_COLOR change_color_lighting(const ALLEGRO_COLOR &c, const float l) {
     ALLEGRO_COLOR c2;
@@ -77,35 +108,16 @@ ALLEGRO_COLOR change_color_lighting(const ALLEGRO_COLOR &c, const float l) {
 
 
 /* ----------------------------------------------------------------------------
- * Changes the game's state.
- */
-void change_game_state(unsigned int new_state) {
-    if(cur_game_state_nr != INVALID) {
-        game_states[cur_game_state_nr]->unload();
-    }
-    cur_game_state_nr = new_state;
-    game_states[cur_game_state_nr]->load();
-    
-    //Because during the loading screens, there is no activity, on the
-    //next frame, the game will assume the time between that and the last
-    //non-loading frame is normal. This could be something like 2 seconds.
-    //Let's reset the delta_t, then.
-    reset_delta_t = true;
-    
-}
-
-
-/* ----------------------------------------------------------------------------
  * Clears the textures of the area's sectors from memory.
  */
 void clear_area_textures() {
-    for(size_t s = 0; s < cur_area_data.sectors.size(); ++s) {
-        sector* s_ptr = cur_area_data.sectors[s];
+    for(size_t s = 0; s < game.cur_area_data.sectors.size(); ++s) {
+        sector* s_ptr = game.cur_area_data.sectors[s];
         if(
             s_ptr->texture_info.bitmap &&
-            s_ptr->texture_info.bitmap != bmp_error
+            s_ptr->texture_info.bitmap != game.bmp_error
         ) {
-            textures.detach(s_ptr->texture_info.file_name);
+            game.textures.detach(s_ptr->texture_info.file_name);
             s_ptr->texture_info.bitmap = NULL;
         }
     }
@@ -115,14 +127,17 @@ void clear_area_textures() {
 /* ----------------------------------------------------------------------------
  * Purposely crashes the engine, reporting as much information as possible to
  * the logs. Used when a fatal problem occurs.
- * reason:      Explanation of the type of crash (assert, SIGSEGV, etc.).
- * info:        Any extra information to report to the logs.
- * exit_status: Program exit status.
+ * reason:
+ *   Explanation of the type of crash (assert, SIGSEGV, etc.).
+ * info:
+ *   Any extra information to report to the logs.
+ * exit_status:
+ *   Program exit status.
  */
 void crash(const string &reason, const string &info, const int exit_status) {
 
-    if(display) {
-        ALLEGRO_BITMAP* backbuffer = al_get_backbuffer(display);
+    if(game.display) {
+        ALLEGRO_BITMAP* backbuffer = al_get_backbuffer(game.display);
         if(backbuffer) {
             al_save_bitmap(
                 (
@@ -139,43 +154,65 @@ void crash(const string &reason, const string &info, const int exit_status) {
         "  Reason: " + reason + ".\n"
         "  Info: " + info + "\n"
         "  Time: " + get_current_time(false) + ".\n";
-    if(errors_reported_today > 0) {
+    if(game.errors_reported_so_far > 0) {
         error_str += "  Error log has messages!\n";
     }
     error_str +=
-        "  Game state: " + (
-            cur_game_state_nr == INVALID ? "None" : i2s(cur_game_state_nr)
-        ) + ". delta_t: " + (
-            delta_t == 0.0f ? "0" :
-            f2s(delta_t) + " (" + f2s(1 / delta_t) + " FPS)"
+        "  Game state: " + game.get_cur_state_name() + ". delta_t: " +
+        (
+            game.delta_t == 0.0f ? "0" :
+            f2s(game.delta_t) + " (" + f2s(1.0f / game.delta_t) + " FPS)"
         ) + ".\n"
-        "  Mob count: " + i2s(mobs.size()) + ". Particle count: " +
-        i2s(particles.get_count()) + ".\n" +
-        "  Bitmaps loaded: " + i2s(bitmaps.get_list_size()) + " (" +
-        i2s(bitmaps.get_total_calls()) + " total calls).\n" +
-        "  Current leader: " ;
+        "  Mob count: " +
+        i2s(game.states.gameplay_st->mobs.all.size()) + ". Particle count: " +
+        i2s(game.states.gameplay_st->particles.get_count()) + ".\n" +
+        "  Bitmaps loaded: " + i2s(game.bitmaps.get_list_size()) + " (" +
+        i2s(game.bitmaps.get_total_calls()) + " total calls).\n" +
+        "  Current area: ";
         
-    if(cur_leader_ptr) {
+    if(!game.cur_area_data.name.empty()) {
         error_str +=
-            cur_leader_ptr->type->name + ", at " +
-            p2s(cur_leader_ptr->pos) + ", state history: " +
-            cur_leader_ptr->fsm.cur_state->name;
+            game.cur_area_data.name + ", version " +
+            game.cur_area_data.version + ".\n";
+    } else {
+        error_str += "none.\n";
+    }
+    
+    error_str += "  Current leader: ";
+    
+    if(game.states.gameplay_st->cur_leader_ptr) {
+        error_str +=
+            game.states.gameplay_st->cur_leader_ptr->type->name + ", at " +
+            p2s(game.states.gameplay_st->cur_leader_ptr->pos) +
+            ", state history: " +
+            game.states.gameplay_st->cur_leader_ptr->fsm.cur_state->name;
         for(size_t h = 0; h < STATE_HISTORY_SIZE; ++h) {
-            error_str += " " + cur_leader_ptr->fsm.prev_state_names[h];
+            error_str +=
+                " " +
+                game.states.gameplay_st->cur_leader_ptr->
+                fsm.prev_state_names[h];
         }
         error_str += "\n  10 closest Pikmin to that leader:\n";
         
-        vector<pikmin*> closest_pikmin = pikmin_list;
+        vector<pikmin*> closest_pikmin =
+            game.states.gameplay_st->mobs.pikmin_list;
         sort(
             closest_pikmin.begin(), closest_pikmin.end(),
         [] (pikmin * p1, pikmin * p2) -> bool {
             return
-            dist(cur_leader_ptr->pos, p1->pos).to_float() <
-            dist(cur_leader_ptr->pos, p2->pos).to_float();
+            dist(
+                game.states.gameplay_st->cur_leader_ptr->pos,
+                p1->pos
+            ).to_float() <
+            dist(
+                game.states.gameplay_st->cur_leader_ptr->pos,
+                p2->pos
+            ).to_float();
         }
         );
         
-        for(size_t p = 0; p < min(closest_pikmin.size(), (size_t) 10); ++p) {
+        size_t closest_p_amount = std::min(closest_pikmin.size(), (size_t) 10);
+        for(size_t p = 0; p < closest_p_amount; ++p) {
             error_str +=
                 "    " + closest_pikmin[p]->type->name + ", at " +
                 p2s(closest_pikmin[p]->pos) + ", history: " +
@@ -195,7 +232,7 @@ void crash(const string &reason, const string &info, const int exit_status) {
         NULL, "Program crash!",
         "Pikifen has crashed!",
         "Sorry about that! To help fix this problem, please read the "
-        "FAQ & troubleshooting section of the readme file. Thanks!",
+        "FAQ & troubleshooting section of the included manual. Thanks!",
         NULL,
         ALLEGRO_MESSAGEBOX_ERROR
     );
@@ -206,8 +243,12 @@ void crash(const string &reason, const string &info, const int exit_status) {
 
 /* ----------------------------------------------------------------------------
  * Stores the names of all files in a folder into a vector.
- * folder_name: Name of the folder.
- * folders:     If true, only read folders. If false, only read files.
+ * folder_name:
+ *   Name of the folder.
+ * folders:
+ *   If true, only read folders. If false, only read files.
+ * folder_found:
+ *   If not NULL, returns whether the folder was found or not.
  */
 vector<string> folder_to_vector(
     string folder_name, const bool folders, bool* folder_found
@@ -269,24 +310,29 @@ vector<string> folder_to_vector(
  * for the current time and weather.
  */
 unsigned char get_blackout_strength() {
-    size_t n_points = cur_area_data.weather_condition.blackout_strength.size();
-    
+    size_t n_points =
+        game.cur_area_data.weather_condition.blackout_strength.size();
+        
     if(n_points == 0) {
         return 0;
     } else if(n_points == 1) {
-        return cur_area_data.weather_condition.blackout_strength[0].second;
+        return game.cur_area_data.weather_condition.blackout_strength[0].second;
     }
     
     for(size_t p = 0; p < n_points - 1; ++p) {
-        auto cur_ptr = &cur_area_data.weather_condition.blackout_strength[p];
+        auto cur_ptr =
+            &game.cur_area_data.weather_condition.blackout_strength[p];
         auto next_ptr =
-            &cur_area_data.weather_condition.blackout_strength[p + 1];
+            &game.cur_area_data.weather_condition.blackout_strength[p + 1];
             
-        if(day_minutes >= cur_ptr->first && day_minutes < next_ptr->first) {
+        if(
+            game.states.gameplay_st->day_minutes >= cur_ptr->first &&
+            game.states.gameplay_st->day_minutes < next_ptr->first
+        ) {
         
             return
                 interpolate_number(
-                    day_minutes,
+                    game.states.gameplay_st->day_minutes,
                     cur_ptr->first, next_ptr->first,
                     cur_ptr->second, next_ptr->second
                 );
@@ -305,12 +351,12 @@ mob* get_closest_mob_to_cursor() {
     dist closest_mob_to_cursor_dist = 0;
     mob* closest_mob_to_cursor = NULL;
     
-    for(size_t m = 0; m < mobs.size(); ++m) {
-        mob* m_ptr = mobs[m];
+    for(size_t m = 0; m < game.states.gameplay_st->mobs.all.size(); ++m) {
+        mob* m_ptr = game.states.gameplay_st->mobs.all[m];
         
         if(!m_ptr->fsm.cur_state) continue;
         
-        dist d = dist(mouse_cursor_w, m_ptr->pos);
+        dist d = dist(game.mouse_cursor_w, m_ptr->pos);
         if(!closest_mob_to_cursor || d < closest_mob_to_cursor_dist) {
             closest_mob_to_cursor = m_ptr;
             closest_mob_to_cursor_dist = d;
@@ -323,8 +369,8 @@ mob* get_closest_mob_to_cursor() {
 
 /* ----------------------------------------------------------------------------
  * Returns a string representing the current date and time.
- * filename_friendly: If true, slashes become dashes,
- *   and semicolons become dots.
+ * filename_friendly:
+ *   If true, slashes become dashes, and semicolons become dots.
  */
 string get_current_time(const bool filename_friendly) {
     time_t tt;
@@ -349,23 +395,26 @@ string get_current_time(const bool filename_friendly) {
  * Returns the daylight effect color for the current time and weather.
  */
 ALLEGRO_COLOR get_daylight_color() {
-    size_t n_points = cur_area_data.weather_condition.daylight.size();
+    size_t n_points = game.cur_area_data.weather_condition.daylight.size();
     
     if(n_points == 0) {
         return al_map_rgba(255, 255, 255, 0);
     } else if(n_points == 1) {
-        return cur_area_data.weather_condition.daylight[0].second;
+        return game.cur_area_data.weather_condition.daylight[0].second;
     }
     
     for(size_t p = 0; p < n_points - 1; ++p) {
-        auto cur_ptr = &cur_area_data.weather_condition.daylight[p];
-        auto next_ptr = &cur_area_data.weather_condition.daylight[p + 1];
+        auto cur_ptr = &game.cur_area_data.weather_condition.daylight[p];
+        auto next_ptr = &game.cur_area_data.weather_condition.daylight[p + 1];
         
-        if(day_minutes >= cur_ptr->first && day_minutes < next_ptr->first) {
+        if(
+            game.states.gameplay_st->day_minutes >= cur_ptr->first &&
+            game.states.gameplay_st->day_minutes < next_ptr->first
+        ) {
         
             return
                 interpolate_color(
-                    day_minutes,
+                    game.states.gameplay_st->day_minutes,
                     cur_ptr->first, next_ptr->first,
                     cur_ptr->second, next_ptr->second
                 );
@@ -381,23 +430,26 @@ ALLEGRO_COLOR get_daylight_color() {
  * Returns the fog color for the current time and weather.
  */
 ALLEGRO_COLOR get_fog_color() {
-    size_t n_points = cur_area_data.weather_condition.fog_color.size();
+    size_t n_points = game.cur_area_data.weather_condition.fog_color.size();
     
     if(n_points == 0) {
         return al_map_rgba(255, 255, 255, 0);
     } else if(n_points == 1) {
-        return cur_area_data.weather_condition.fog_color[0].second;
+        return game.cur_area_data.weather_condition.fog_color[0].second;
     }
     
     for(size_t p = 0; p < n_points - 1; ++p) {
-        auto cur_ptr = &cur_area_data.weather_condition.fog_color[p];
-        auto next_ptr = &cur_area_data.weather_condition.fog_color[p + 1];
+        auto cur_ptr = &game.cur_area_data.weather_condition.fog_color[p];
+        auto next_ptr = &game.cur_area_data.weather_condition.fog_color[p + 1];
         
-        if(day_minutes >= cur_ptr->first && day_minutes < next_ptr->first) {
+        if(
+            game.states.gameplay_st->day_minutes >= cur_ptr->first &&
+            game.states.gameplay_st->day_minutes < next_ptr->first
+        ) {
         
             return
                 interpolate_color(
-                    day_minutes,
+                    game.states.gameplay_st->day_minutes,
                     cur_ptr->first, next_ptr->first,
                     cur_ptr->second, next_ptr->second
                 );
@@ -410,28 +462,18 @@ ALLEGRO_COLOR get_fog_color() {
 
 
 /* ----------------------------------------------------------------------------
- * Returns the highest height a thrown mob can reach, given the Z speed
- * of the throw. This is only the theoritical max; framerate may tamper
- * with the exact value.
- */
-float get_max_throw_height(const float throw_strength) {
-    /* Formula from
-     * http://www.dummies.com/education/science/physics/
-     * how-to-calculate-the-maximum-height-of-a-projectile/
-     */
-    return (-pow(throw_strength, 2)) / (2 * GRAVITY_ADDER);
-}
-
-
-/* ----------------------------------------------------------------------------
  * Returns the width and height of a block of multi-line text.
  * Lines are split by a single "\n" character.
  * These are the dimensions of a bitmap
  * that would hold a drawing by draw_text_lines().
- * font:  The text's font.
- * text:  The text.
- * ret_w: The width gets returned here, if not NULL.
- * ret_h: The height gets returned here, if not NULL.
+ * font:
+ *   The text's font.
+ * text:
+ *   The text.
+ * ret_w:
+ *   The width gets returned here, if not NULL.
+ * ret_h:
+ *   The height gets returned here, if not NULL.
  */
 void get_multiline_text_dimensions(
     const ALLEGRO_FONT* const font, const string &text, int* ret_w, int* ret_h
@@ -440,13 +482,13 @@ void get_multiline_text_dimensions(
     int fh = al_get_font_line_height(font);
     size_t n_lines = lines.size();
     
-    if(ret_h) *ret_h = max(0, (int) ((fh + 1) * n_lines) - 1);
+    if(ret_h) *ret_h = std::max(0, (int) ((fh + 1) * n_lines) - 1);
     
     if(ret_w) {
         int largest_w = 0;
         for(size_t l = 0; l < lines.size(); ++l) {
             largest_w =
-                max(
+                std::max(
                     largest_w, al_get_text_width(font, lines[l].c_str())
                 );
         }
@@ -460,23 +502,28 @@ void get_multiline_text_dimensions(
  * Returns the sun strength for the current time and weather.
  */
 float get_sun_strength() {
-    size_t n_points = cur_area_data.weather_condition.sun_strength.size();
+    size_t n_points = game.cur_area_data.weather_condition.sun_strength.size();
     
     if(n_points == 0) {
         return 1.0f;
     } else if(n_points == 1) {
-        return cur_area_data.weather_condition.sun_strength[0].second;
+        return game.cur_area_data.weather_condition.sun_strength[0].second;
     }
     
     for(size_t p = 0; p < n_points - 1; ++p) {
-        auto cur_ptr = &cur_area_data.weather_condition.sun_strength[p];
-        auto next_ptr = &cur_area_data.weather_condition.sun_strength[p + 1];
-        
-        if(day_minutes >= cur_ptr->first && day_minutes < next_ptr->first) {
+        auto cur_ptr =
+            &game.cur_area_data.weather_condition.sun_strength[p];
+        auto next_ptr =
+            &game.cur_area_data.weather_condition.sun_strength[p + 1];
+            
+        if(
+            game.states.gameplay_st->day_minutes >= cur_ptr->first &&
+            game.states.gameplay_st->day_minutes < next_ptr->first
+        ) {
         
             return
                 interpolate_number(
-                    day_minutes,
+                    game.states.gameplay_st->day_minutes,
                     cur_ptr->first, next_ptr->first,
                     cur_ptr->second, next_ptr->second
                 ) / 255.0f;
@@ -487,64 +534,26 @@ float get_sun_strength() {
     return 1.0f;
 }
 
-/* ----------------------------------------------------------------------------
- * Returns the Z speed for a mob throw, given a height strength multiplier.
- */
-float get_throw_z_speed(const float strength_multiplier) {
-    return -(GRAVITY_ADDER) * (THROW_STRENGTH_MULTIPLIER * strength_multiplier);
-}
-
-
-/* ----------------------------------------------------------------------------
- * Returns the value of a var on the vars listing of a mob's spawn.
- */
-string get_var_value(
-    const string &vars_string, const string &var, const string &def
-) {
-    vector<string> vars = semicolon_list_to_vector(vars_string);
-    
-    for(size_t v = 0; v < vars.size(); ++v) {
-        size_t equals_pos = vars[v].find("=");
-        string var_name = trim_spaces(vars[v].substr(0, equals_pos));
-        
-        if(var_name != var) continue;
-        
-        return
-            trim_spaces(
-                vars[v].substr(
-                    equals_pos + 1, vars[v].size() - (equals_pos + 1)
-                ),
-                true
-            );
-    }
-    
-    return def;
-}
-
 
 /* ----------------------------------------------------------------------------
  * Given a string representation of mob script variables,
- * returns two vectors: one for the variable names, and one for their values.
+ * returns a map, where every key is a variable, and every value is the
+ * variable's value.
+ * vars_string:
+ *   String with the variables.
  */
-void get_var_vectors(
-    const string &vars_string,
-    vector<string> &var_names, vector<string> &var_values
-) {
+map<string, string> get_var_map(const string &vars_string) {
+    map<string, string> final_map;
     vector<string> raw_vars = semicolon_list_to_vector(vars_string);
     
     for(size_t v = 0; v < raw_vars.size(); ++v) {
         vector<string> raw_parts = split(raw_vars[v], "=");
-        if(raw_parts.size() == 0) {
-            var_names.push_back("");
-        } else {
-            var_names.push_back(trim_spaces(raw_parts[0]));
+        if(raw_parts.size() < 2) {
+            continue;
         }
-        if(raw_parts.size() == 1) {
-            var_values.push_back("");
-        } else {
-            var_values.push_back(trim_spaces(raw_parts[1]));
-        }
+        final_map[trim_spaces(raw_parts[0])] = trim_spaces(raw_parts[1]);
     }
+    return final_map;
 }
 
 
@@ -557,8 +566,9 @@ const float WALL_SHADOW_LENGTH_MULT = 0.2f;
 
 /* ----------------------------------------------------------------------------
  * Returns the length a wall's shadow should be.
- * height_difference: Difference in height between the sector casting the shadow
- * * and the one the shadow is being cast on.
+ * height_difference:
+ *   Difference in height between the sector casting the shadow
+ *   and the one the shadow is being cast on.
  */
 float get_wall_shadow_length(const float height_difference) {
     return
@@ -572,9 +582,11 @@ float get_wall_shadow_length(const float height_difference) {
 
 /* ----------------------------------------------------------------------------
  * Auxiliary function that returns a table used in the weather configs.
+ * node:
+ *   Data node with the weather table.
  */
-vector<pair<size_t, string> > get_weather_table(data_node* node) {
-    vector<pair<size_t, string> > table;
+vector<std::pair<size_t, string> > get_weather_table(data_node* node) {
+    vector<std::pair<size_t, string> > table;
     size_t n_points = node->get_nr_of_children();
     
     bool have_midnight = false;
@@ -593,8 +605,8 @@ vector<pair<size_t, string> > get_weather_table(data_node* node) {
     sort(
         table.begin(), table.end(),
         [] (
-            pair<size_t, string> p1,
-            pair<size_t, string> p2
+            std::pair<size_t, string> p1,
+            std::pair<size_t, string> p2
     ) -> bool {
         return p1.first < p2.first;
     }
@@ -618,10 +630,17 @@ vector<pair<size_t, string> > get_weather_table(data_node* node) {
 
 /* ----------------------------------------------------------------------------
  * Returns the interpolation between two colors, given a number in an interval.
- * n: The number.
- * n1, n2: The interval the number falls on.
- * * The closer to n1, the closer the final color is to c1.
- * c1, c2: Colors.
+ * n:
+ *   The number.
+ * n1:
+ *   Start of the interval the number falls on, inclusive.
+ *   The closer to n1, the closer the final color is to c1.
+ * n2:
+ *   End of the interval the number falls on, inclusive.
+ * c1:
+ *   Color on the first end of the interpolation.
+ * c2:
+ *   Color on the second end of the interpolation.
  */
 ALLEGRO_COLOR interpolate_color(
     const float n, const float n1, const float n2,
@@ -640,8 +659,10 @@ ALLEGRO_COLOR interpolate_color(
 
 /* ----------------------------------------------------------------------------
  * Prints something onto the error log.
- * s: String that represents the error.
- * d: If not null, this will be used to obtain the file name
+ * s:
+ *   String that represents the error.
+ * d:
+ *   If not null, this will be used to obtain the file name
  *   and line that caused the error.
  */
 void log_error(string s, data_node* d) {
@@ -652,15 +673,16 @@ void log_error(string s, data_node* d) {
     }
     s += "\n";
     
-    cout << s;
+    std::cout << s;
     
-    if(errors_reported_today == 0) {
+    if(game.errors_reported_so_far == 0) {
         s =
             "\n" +
             get_current_time(false) +
             "; Pikifen version " +
             i2s(VERSION_MAJOR) + "." + i2s(VERSION_MINOR) +
-            "." + i2s(VERSION_REV) + "\n" + s;
+            "." + i2s(VERSION_REV) + ", game version " +
+            game.config.version + "\n" + s;
     }
     
     string prev_error_log;
@@ -681,13 +703,16 @@ void log_error(string s, data_node* d) {
         al_fclose(file_o);
     }
     
-    errors_reported_today++;
+    game.errors_reported_so_far++;
 }
 
 
 /* ----------------------------------------------------------------------------
  * Converts a point to a string.
- * If z is present, the third word is placed there.
+ * p:
+ *   Point to convert.
+ * z:
+ *   If not NULL, the third word is placed here.
  */
 string p2s(const point &p, float* z) {
     return f2s(p.x) + " " + f2s(p.y) + (z ? " " + f2s(*z) : "");
@@ -696,24 +721,34 @@ string p2s(const point &p, float* z) {
 
 /* ----------------------------------------------------------------------------
  * Prints a bit of info onto the screen, for some seconds.
- * text:           Text to print. Can use line breaks.
- * total_duration: Total amount of time in which the text is present.
- * fade_duration:  When closing, fade out in the last N seconds.
+ * text:
+ *   Text to print. Can use line breaks.
+ * total_duration:
+ *   Total amount of time in which the text is present.
+ * fade_duration:
+ *   When closing, fade out in the last N seconds.
  */
 void print_info(
     const string &text, const float total_duration, const float fade_duration
 ) {
-    info_print_text = text;
-    info_print_duration = total_duration;
-    info_print_fade_duration = fade_duration;
-    info_print_timer.start(total_duration);
+    game.maker_tools.info_print_text = text;
+    game.maker_tools.info_print_duration = total_duration;
+    game.maker_tools.info_print_fade_duration = fade_duration;
+    game.maker_tools.info_print_timer.start(total_duration);
 }
 
 
 /* ----------------------------------------------------------------------------
  * Creates and opens an Allegro native file dialog, and returns
  * the user's choice(s).
- * The arguments are the same you'd pass to al_create_native_file_dialog().
+ * initial_path:
+ *   Initial path for the dialog.
+ * title:
+ *   Title of the dialog.
+ * patterns:
+ *   File name patterns to match, separated by semicolon.
+ * mode:
+ *   al_create_native_file_dialog mode flags.
  */
 vector<string> prompt_file_dialog(
     const string &initial_path, const string &title,
@@ -724,7 +759,7 @@ vector<string> prompt_file_dialog(
             initial_path.c_str(), title.c_str(),
             patterns.c_str(), mode
         );
-    al_show_native_file_dialog(display, dialog);
+    al_show_native_file_dialog(game.display, dialog);
     
     //Reset the locale, which gets set by Allegro's native dialogs...
     //and breaks s2f().
@@ -748,23 +783,32 @@ vector<string> prompt_file_dialog(
 /* ----------------------------------------------------------------------------
  * Creates and opens an Allegro native file dialog, and returns
  * the user's choice(s), but confines the results to a specific folder.
- * The result pointer returns 0 on success, 1 if the one or more choices
- * do not belong to the specified folder, and 2 if the user canceled.
- * The folder argument is the folder to lock to, without the ending slash.
- * The other arguments are the same you'd pass to prompt_file_dialog().
+ * The result pointer returns FILE_DIALOG_RES_SUCCESS on success,
+ * FILE_DIALOG_RES_WRONG_FOLDER if the one or more choices do not belong to
+ * the specified folder, and FILE_DIALOG_RES_CANCELED if the user canceled.
  * The list of choices that are returned only have the file name, not the
  * rest of the path. Choices can also be contained inside subfolders of the
  * specified folder.
+ * folder:
+ *   The folder to lock to, without the ending slash.
+ * title:
+ *   Title of the dialog.
+ * patterns:
+ *   File name patterns to match, separated by semicolon.
+ * mode:
+ *   al_create_native_file_dialog mode flags.
+ * result:
+ *   The result of the dialog is returned here.
  */
 vector<string> prompt_file_dialog_locked_to_folder(
     const string &folder, const string &title,
-    const string &patterns, const int mode, unsigned char* result
+    const string &patterns, const int mode, FILE_DIALOG_RESULTS* result
 ) {
     vector<string> f =
         prompt_file_dialog(folder + "/", title, patterns, mode);
         
     if(f.empty() || f[0].empty()) {
-        *result = 2;
+        *result = FILE_DIALOG_RES_CANCELED;
         return vector<string>();
     }
     
@@ -772,7 +816,7 @@ vector<string> prompt_file_dialog_locked_to_folder(
         size_t folder_pos = f[0].find(folder);
         if(folder_pos == string::npos) {
             //This isn't in the specified folder!
-            *result = 1;
+            *result = FILE_DIALOG_RES_WRONG_FOLDER;
             return vector<string>();
         } else {
             f[fi] =
@@ -780,7 +824,7 @@ vector<string> prompt_file_dialog_locked_to_folder(
         }
     }
     
-    *result = 0;
+    *result = FILE_DIALOG_RES_SUCCESS;
     return f;
 }
 
@@ -788,7 +832,8 @@ vector<string> prompt_file_dialog_locked_to_folder(
 /* ----------------------------------------------------------------------------
  * Basically, it destroys and recreates a bitmap.
  * The main purpose of this is to update its mipmap.
- * b: The bitmap.
+ * b:
+ *   The bitmap.
  */
 ALLEGRO_BITMAP* recreate_bitmap(ALLEGRO_BITMAP* b) {
     ALLEGRO_BITMAP* fixed_mipmap = al_clone_bitmap(b);
@@ -799,6 +844,10 @@ ALLEGRO_BITMAP* recreate_bitmap(ALLEGRO_BITMAP* b) {
 
 /* ----------------------------------------------------------------------------
  * Reports a fatal error to the user and shuts down the program.
+ * s:
+ *   String explaining the error.
+ * dn:
+ *   File to log the error into, if any.
  */
 void report_fatal_error(const string &s, data_node* dn) {
     log_error(s, dn);
@@ -817,456 +866,11 @@ void report_fatal_error(const string &s, data_node* dn) {
 
 
 /* ----------------------------------------------------------------------------
- * Converts a string to a point.
- * If z is present, the third word is placed there.
+ * Converts a string to an Allegro color.
+ * Components are separated by spaces, and the final one (alpha) is optional.
+ * s:
+ *   String to convert.
  */
-point s2p(const string &s, float* z) {
-    vector<string> words = split(s);
-    point p;
-    if(words.size() >= 1) {
-        p.x = s2f(words[0]);
-    }
-    if(words.size() >= 2) {
-        p.y = s2f(words[1]);
-    }
-    if(z && words.size() >= 3) {
-        *z = s2f(words[2]);
-    }
-    return p;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Saves the creator tools settings.
- */
-void save_creator_tools() {
-    data_node file("", "");
-    
-    file.add(
-        new data_node("enabled", b2s(creator_tools_enabled))
-    );
-    
-    for(unsigned char k = 0; k < 20; k++) {
-        string tool_key;
-        string tool_name;
-        if(k < 10) {
-            //The first ten indexes are the F2 - F11 keys.
-            tool_key = "f" + i2s(k + 2);
-        } else {
-            //The second ten indexes are the 0 - 9 keys.
-            tool_key = i2s(k - 10);
-        }
-        
-        if(creator_tool_keys[k] == CREATOR_TOOL_AREA_IMAGE) {
-            tool_name = "area_image";
-        } else if(creator_tool_keys[k] == CREATOR_TOOL_CHANGE_SPEED) {
-            tool_name = "change_speed";
-        } else if(creator_tool_keys[k] == CREATOR_TOOL_GEOMETRY_INFO) {
-            tool_name = "geometry_info";
-        } else if(creator_tool_keys[k] == CREATOR_TOOL_HITBOXES) {
-            tool_name = "hitboxes";
-        } else if(creator_tool_keys[k] == CREATOR_TOOL_HURT_MOB) {
-            tool_name = "hurt_mob";
-        } else if(creator_tool_keys[k] == CREATOR_TOOL_MOB_INFO) {
-            tool_name = "mob_info";
-        } else if(creator_tool_keys[k] == CREATOR_TOOL_NEW_PIKMIN) {
-            tool_name = "new_pikmin";
-        } else if(creator_tool_keys[k] == CREATOR_TOOL_TELEPORT) {
-            tool_name = "teleport";
-        }
-        
-        file.add(new data_node(tool_key, tool_name));
-    }
-    
-    file.add(
-        new data_node(
-            "area_image_mobs", b2s(creator_tool_area_image_mobs)
-        )
-    );
-    file.add(
-        new data_node(
-            "area_image_shadows", b2s(creator_tool_area_image_shadows)
-        )
-    );
-    file.add(
-        new data_node(
-            "area_image_size", i2s(creator_tool_area_image_size)
-        )
-    );
-    file.add(
-        new data_node(
-            "change_speed_multiplier", f2s(creator_tool_change_speed_mult)
-        )
-    );
-    file.add(
-        new data_node(
-            "mob_hurting_percentage", f2s(creator_tool_mob_hurting_ratio * 100)
-        )
-    );
-    
-    file.add(
-        new data_node(
-            "auto_start_option", creator_tool_auto_start_option
-        )
-    );
-    file.add(
-        new data_node(
-            "auto_start_mode", creator_tool_auto_start_mode
-        )
-    );
-    
-    file.save_file(CREATOR_TOOLS_FILE_PATH, true, true);
-}
-
-
-/* ----------------------------------------------------------------------------
- * Saves the player's options.
- */
-void save_options() {
-    data_node file("", "");
-    
-    //First, group the controls by action and player.
-    map<string, string> grouped_controls;
-    
-    for(unsigned char p = 0; p < MAX_PLAYERS; ++p) {
-        string prefix = "p" + i2s((p + 1)) + "_";
-        for(size_t b = 0; b < N_BUTTONS; ++b) {
-            string option_name = buttons.list[b].option_name;
-            if(option_name.empty()) continue;
-            grouped_controls[prefix + option_name].clear();
-        }
-    }
-    
-    //Write down their control strings.
-    for(size_t p = 0; p < MAX_PLAYERS; p++) {
-        size_t n_controls = controls[p].size();
-        for(size_t c = 0; c < n_controls; ++c) {
-            string name = "p" + i2s(p + 1) + "_";
-            
-            for(size_t b = 0; b < N_BUTTONS; ++b) {
-                if(buttons.list[b].option_name.empty()) continue;
-                if(controls[p][c].action == buttons.list[b].id) {
-                    name += buttons.list[b].option_name;
-                    break;
-                }
-            }
-            
-            grouped_controls[name] += controls[p][c].stringify() + ";";
-        }
-    }
-    
-    //Save controls.
-    for(auto c = grouped_controls.begin(); c != grouped_controls.end(); ++c) {
-        //Remove the final character, which is always an extra semicolon.
-        if(c->second.size()) c->second.erase(c->second.size() - 1);
-        
-        file.add(new data_node(c->first, c->second));
-    }
-    
-    for(unsigned char p = 0; p < MAX_PLAYERS; ++p) {
-        file.add(
-            new data_node(
-                "p" + i2s((p + 1)) + "_mouse_moves_cursor",
-                b2s(mouse_moves_cursor[p])
-            )
-        );
-    }
-    
-    //Other options.
-    file.add(
-        new data_node(
-            "area_editor_backup_interval", f2s(area_editor_backup_interval)
-        )
-    );
-    file.add(
-        new data_node(
-            "area_editor_grid_interval", i2s(area_editor_grid_interval)
-        )
-    );
-    file.add(
-        new data_node(
-            "area_editor_show_edge_length", b2s(area_editor_show_edge_length)
-        )
-    );
-    file.add(
-        new data_node(
-            "area_editor_undo_limit", i2s(area_editor_undo_limit)
-        )
-    );
-    file.add(
-        new data_node(
-            "area_editor_view_mode", i2s(area_editor_view_mode)
-        )
-    );
-    file.add(
-        new data_node(
-            "draw_cursor_trail", b2s(draw_cursor_trail)
-        )
-    );
-    file.add(
-        new data_node(
-            "editor_mmb_pan", b2s(editor_mmb_pan)
-        )
-    );
-    file.add(
-        new data_node(
-            "editor_mouse_drag_threshold", i2s(editor_mouse_drag_threshold)
-        )
-    );
-    file.add(new data_node("fps", i2s(game_fps)));
-    file.add(new data_node("fullscreen", b2s(intended_scr_fullscreen)));
-    file.add(
-        new data_node("joystick_min_deadzone", f2s(joystick_min_deadzone))
-    );
-    file.add(
-        new data_node("joystick_max_deadzone", f2s(joystick_max_deadzone))
-    );
-    file.add(new data_node("max_particles", i2s(max_particles)));
-    file.add(new data_node("middle_zoom_level", f2s(zoom_mid_level)));
-    file.add(new data_node("mipmaps", b2s(mipmaps_enabled)));
-    file.add(new data_node("pretty_whistle", b2s(pretty_whistle)));
-    file.add(
-        new data_node(
-            "resolution", i2s(intended_scr_w) + " " + i2s(intended_scr_h)
-        )
-    );
-    file.add(new data_node("smooth_scaling", b2s(smooth_scaling)));
-    file.add(new data_node("window_position_hack", b2s(window_position_hack)));
-    
-    for(size_t h = 0; h < ANIMATION_EDITOR_HISTORY_SIZE; ++h) {
-        file.add(
-            new data_node(
-                "animation_editor_history_" + i2s(h + 1),
-                animation_editor_history[h]
-            )
-        );
-    }
-    
-    file.save_file(OPTIONS_FILE_PATH, true, true);
-}
-
-
-/* ----------------------------------------------------------------------------
- * Saves the current backbuffer onto a file.
- * In other words, dumps a screenshot.
- */
-void save_screenshot() {
-    string base_file_name = "Screenshot_" + get_current_time(true);
-    
-    //Check if a file with this name already exists.
-    vector<string> files = folder_to_vector(USER_DATA_FOLDER_PATH, false);
-    size_t variant_nr = 1;
-    string final_file_name = base_file_name;
-    bool valid_name = false;
-    
-    do {
-    
-        if(
-            find(files.begin(), files.end(), final_file_name + ".png")
-            == files.end()
-        ) {
-            //File name not found.
-            //Go ahead and create a screenshot with this name.
-            valid_name = true;
-        } else {
-            variant_nr++;
-            final_file_name = base_file_name + " " + i2s(variant_nr);
-        }
-        
-    } while(!valid_name);
-    
-    al_save_bitmap(
-        (USER_DATA_FOLDER_PATH + "/" + final_file_name + ".png").c_str(),
-        al_get_backbuffer(display)
-    );
-}
-
-
-/* ----------------------------------------------------------------------------
- * Returns a vector with all items inside a semicolon-separated list.
- * s:   The string containing the list.
- * sep: Separator to use, in case you need something else. Default is semicolon.
- */
-vector<string> semicolon_list_to_vector(const string &s, const string &sep) {
-    vector<string> parts = split(s, sep);
-    for(size_t p = 0; p < parts.size(); ++p) {
-        parts[p] = trim_spaces(parts[p]);
-    }
-    return parts;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Shows a native message box. It is better to call this rather than
- * al_show_native_message_box() directly because it does not reset the locale
- * after it is done.
- * The parameters are the same ones you'd pass to the Allegro function.
- */
-int show_message_box(
-    ALLEGRO_DISPLAY* display, char const* title, char const* heading,
-    char const* text, char const* buttons, int flags
-) {
-    int ret =
-        al_show_native_message_box(
-            display, title, heading, text, buttons, flags
-        );
-    //Reset the locale, which gets set by Allegro's native dialogs...
-    //and breaks s2f().
-    setlocale(LC_ALL, "C");
-    
-    return ret;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Handles a system signal.
- */
-void signal_handler(const int signum) {
-    volatile static bool already_handling_signal = false;
-    
-    if(already_handling_signal) {
-        //This stops an infinite loop if there's a signal raise
-        //inside this function. It shouldn't happen, but better be safe.
-        exit(signum);
-    }
-    already_handling_signal = true;
-    
-    string bt_str = "Backtrace:\n";
-    vector<string> bt = get_backtrace();
-    for(size_t s = 0; s < bt.size(); ++s) {
-        bt_str += "    " + bt[s] + "\n";
-    }
-    if(bt_str.back() == '\n') {
-        bt_str.pop_back();
-    }
-    string signal_name(strsignal(signum));
-    string type_str = "Signal " + i2s(signum) + " (" + signal_name + ")";
-    
-    crash(type_str, bt_str, signum);
-}
-
-
-/* ----------------------------------------------------------------------------
- * Spews out a Pikmin from a given point. Used by Onions and converters.
- */
-void spew_pikmin_seed(
-    const point pos, const float z, pikmin_type* pik_type,
-    const float angle, const float horizontal_speed, const float vertical_speed
-) {
-    pikmin* new_pikmin =
-        (
-            (pikmin*)
-            create_mob(
-                mob_categories.get(MOB_CATEGORY_PIKMIN),
-                pos, pik_type, angle, ""
-            )
-        );
-    new_pikmin->z = z;
-    new_pikmin->speed.x = cos(angle) * horizontal_speed;
-    new_pikmin->speed.y = sin(angle) * horizontal_speed;
-    new_pikmin->speed_z = vertical_speed;
-    new_pikmin->fsm.set_state(PIKMIN_STATE_SEED);
-    new_pikmin->maturity = 0;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Standardizes a path, making it use forward slashes instead of backslashes,
- * and removing excess slashes at the end.
- */
-string standardize_path(const string &path) {
-    string res = replace_all(path, "\\", "/");
-    if(res.back() == '/') res.pop_back();
-    return res;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Starts the display of a text message.
- * If the text is empty, it closes the message box.
- * Any newline characters or slashes followed by n ("\n") will be used to
- * separate the message into lines.
- * text:        Text to display.
- * speaker_bmp: Bitmap representing the speaker.
- */
-void start_message(string text, ALLEGRO_BITMAP* speaker_bmp) {
-    text = replace_all(text, "\\n", "\n");
-    if(text.size()) if(text.back() == '\n') text.pop_back();
-    cur_message = text;
-    cur_message_char = 0;
-    cur_message_char_timer.start();
-    cur_message_speaker = speaker_bmp;
-    cur_message_stopping_chars.clear();
-    //First character. Makes it easier.
-    cur_message_stopping_chars.push_back(0);
-    cur_message_section = 0;
-    
-    vector<string> lines = split(text, "\n");
-    size_t char_count = 0;
-    for(size_t l = 0; l < lines.size(); ++l) {
-        //+1 because of the new line character.
-        char_count += lines[l].size() + 1;
-        if((l + 1) % 3 == 0) cur_message_stopping_chars.push_back(char_count);
-    }
-    
-    if(cur_message_stopping_chars.size() > 1) {
-        //Remove one because the last line doesn't have a new line character.
-        //Even if it does, it's invisible.
-        cur_message_stopping_chars.back()--;
-    }
-    cur_message_stopping_chars.push_back(cur_message.size());
-}
-
-
-/* ----------------------------------------------------------------------------
- * Updates the history list for the animation editor,
- * adding a new entry or bumping it up.
- */
-void update_animation_editor_history(const string &n) {
-    //First, check if it exists.
-    size_t pos = INVALID;
-    
-    for(size_t h = 0; h < animation_editor_history.size(); ++h) {
-        if(animation_editor_history[h] == n) {
-            pos = h;
-            break;
-        }
-    }
-    
-    if(pos == 0) {
-        //Already #1? Never mind.
-        return;
-    } else if(pos == INVALID) {
-        //If it doesn't exist, create it and add it to the top.
-        animation_editor_history.insert(animation_editor_history.begin(), n);
-    } else {
-        //Otherwise, remove it from its spot and bump it to the top.
-        animation_editor_history.erase(animation_editor_history.begin() + pos);
-        animation_editor_history.insert(animation_editor_history.begin(), n);
-    }
-    
-    if(animation_editor_history.size() > ANIMATION_EDITOR_HISTORY_SIZE) {
-        animation_editor_history.erase(
-            animation_editor_history.begin() +
-            animation_editor_history.size() - 1
-        );
-    }
-}
-
-
-//Calls al_fwrite, but with an std::string instead of a c-string.
-void al_fwrite(ALLEGRO_FILE* f, string s) { al_fwrite(f, s.c_str(), s.size()); }
-
-
-//Converts a color to its string representation.
-string c2s(const ALLEGRO_COLOR &c) {
-    return i2s(c.r * 255) + " " + i2s(c.g * 255) + " " + i2s(c.b * 255) +
-           (c.a == 1 ? "" : " " + i2s(c.a * 255));
-}
-
-
-//Converts a string to an Allegro color.
-//Components are separated by spaces, and the final one (alpha) is optional.
 ALLEGRO_COLOR s2c(const string &s) {
     string s2 = s;
     s2 = trim_spaces(s2);
@@ -1302,28 +906,421 @@ ALLEGRO_COLOR s2c(const string &s) {
 }
 
 
-#if defined(_WIN32)
+/* ----------------------------------------------------------------------------
+ * Converts a string to a point.
+ * s:
+ *   String to convert.
+ * z:
+ *   If not NULL, the third word is placed here.
+ */
+point s2p(const string &s, float* z) {
+    vector<string> words = split(s);
+    point p;
+    if(words.size() >= 1) {
+        p.x = s2f(words[0]);
+    }
+    if(words.size() >= 2) {
+        p.y = s2f(words[1]);
+    }
+    if(z && words.size() >= 3) {
+        *z = s2f(words[2]);
+    }
+    return p;
+}
 
-string strsignal(const int signum) {
-    if(signum == SIGINT) {
-        return "SIGINT";
-    } else if(signum == SIGILL) {
-        return "SIGILL";
-    } else if(signum == SIGFPE) {
-        return "SIGFPE";
-    } else if(signum == SIGSEGV) {
-        return "SIGSEGV";
-    } else if(signum == SIGTERM) {
-        return "SIGTERM";
-    } else if(signum == SIGBREAK) {
-        return "SIGBREAK";
-    } else if(signum == SIGABRT) {
-        return "SIGABRT";
-    } else if(signum == SIGABRT_COMPAT) {
-        return "SIGABRT_COMPAT";
+
+/* ----------------------------------------------------------------------------
+ * Sanitizes a file name (or part of it), such that it doesn't use any
+ * weird characters.
+ * Do not use on paths, since colons, slashes, and backslashes will be replaced!
+ * s:
+ *   File name to sanitize.
+ */
+string sanitize_file_name(const string &s) {
+    string ret;
+    ret.reserve(s.size());
+    for(size_t c = 0; c < s.size(); ++c) {
+        if(
+            (s[c] >= 'A' && s[c] <= 'Z') ||
+            (s[c] >= 'a' && s[c] <= 'z') ||
+            (s[c] >= '0' && s[c] <= '9') ||
+            s[c] == '-' ||
+            s[c] == ' '
+        ) {
+            ret.push_back(s[c]);
+        } else {
+            ret.push_back('_');
+        }
+    }
+    return ret;
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Saves the maker tools settings.
+ */
+void save_maker_tools() {
+    data_node file("", "");
+    
+    file.add(
+        new data_node("enabled", b2s(game.maker_tools.enabled))
+    );
+    
+    for(unsigned char k = 0; k < 20; k++) {
+        string tool_key;
+        if(k < 10) {
+            //The first ten indexes are the F2 - F11 keys.
+            tool_key = "f" + i2s(k + 2);
+        } else {
+            //The second ten indexes are the 0 - 9 keys.
+            tool_key = i2s(k - 10);
+        }
+        string tool_name = MAKER_TOOL_NAMES[game.maker_tools.keys[k]];
+        
+        file.add(new data_node(tool_key, tool_name));
+    }
+    
+    file.add(
+        new data_node(
+            "area_image_mobs", b2s(game.maker_tools.area_image_mobs)
+        )
+    );
+    file.add(
+        new data_node(
+            "area_image_shadows", b2s(game.maker_tools.area_image_shadows)
+        )
+    );
+    file.add(
+        new data_node(
+            "area_image_size", i2s(game.maker_tools.area_image_size)
+        )
+    );
+    file.add(
+        new data_node(
+            "change_speed_multiplier", f2s(game.maker_tools.change_speed_mult)
+        )
+    );
+    file.add(
+        new data_node(
+            "mob_hurting_percentage",
+            f2s(game.maker_tools.mob_hurting_ratio * 100)
+        )
+    );
+    
+    file.add(
+        new data_node(
+            "auto_start_option", game.maker_tools.auto_start_option
+        )
+    );
+    file.add(
+        new data_node(
+            "auto_start_mode", game.maker_tools.auto_start_mode
+        )
+    );
+    file.add(
+        new data_node(
+            "performance_monitor", b2s(game.maker_tools.use_perf_mon)
+        )
+    );
+    
+    file.save_file(MAKER_TOOLS_FILE_PATH, true, true);
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Saves the player's options.
+ */
+void save_options() {
+    data_node file("", "");
+    
+    //Save the standard options.
+    game.options.save(&file);
+    
+    //Also add the animation editor history.
+    for(
+        size_t h = 0; h < game.states.animation_editor_st->history.size(); ++h
+    ) {
+        file.add(
+            new data_node(
+                "animation_editor_history_" + i2s(h + 1),
+                game.states.animation_editor_st->history[h]
+            )
+        );
+    }
+    
+    //Finally, save.
+    file.save_file(OPTIONS_FILE_PATH, true, true);
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Saves the current backbuffer onto a file.
+ * In other words, dumps a screenshot.
+ */
+void save_screenshot() {
+    string base_file_name = "Screenshot_" + get_current_time(true);
+    
+    //Check if a file with this name already exists.
+    vector<string> files = folder_to_vector(USER_DATA_FOLDER_PATH, false);
+    size_t variant_nr = 1;
+    string final_file_name = base_file_name;
+    bool valid_name = false;
+    
+    do {
+    
+        if(
+            find(files.begin(), files.end(), final_file_name + ".png")
+            == files.end()
+        ) {
+            //File name not found.
+            //Go ahead and create a screenshot with this name.
+            valid_name = true;
+        } else {
+            variant_nr++;
+            final_file_name = base_file_name + " " + i2s(variant_nr);
+        }
+        
+    } while(!valid_name);
+    
+    al_save_bitmap(
+        (USER_DATA_FOLDER_PATH + "/" + final_file_name + ".png").c_str(),
+        al_get_backbuffer(game.display)
+    );
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Returns a vector with all items inside a semicolon-separated list.
+ * s:
+ *   The string containing the list.
+ * sep:
+ *   Separator to use, in case you need something else. Default is semicolon.
+ */
+vector<string> semicolon_list_to_vector(const string &s, const string &sep) {
+    vector<string> parts = split(s, sep);
+    for(size_t p = 0; p < parts.size(); ++p) {
+        parts[p] = trim_spaces(parts[p]);
+    }
+    return parts;
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Shows a native message box. It is better to call this rather than
+ * al_show_native_message_box() directly because it does not reset the locale
+ * after it is done.
+ * display:
+ *   Display responsible for this dialog.
+ * title:
+ *   Title to display on the dialog.
+ * heading:
+ *   Heading text to display on the dialog.
+ * text:
+ *   Main text to display on the dialog.
+ * buttons:
+ *   Buttons the user can press.
+ * flags:
+ *   al_show_native_message_box flags.
+ */
+int show_message_box(
+    ALLEGRO_DISPLAY* display, char const* title, char const* heading,
+    char const* text, char const* buttons, int flags
+) {
+    int ret =
+        al_show_native_message_box(
+            display, title, heading, text, buttons, flags
+        );
+    //Reset the locale, which gets set by Allegro's native dialogs...
+    //and breaks s2f().
+    setlocale(LC_ALL, "C");
+    
+    return ret;
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Handles a system signal.
+ * signum:
+ *   Signal number.
+ */
+void signal_handler(const int signum) {
+    volatile static bool already_handling_signal = false;
+    
+    if(already_handling_signal) {
+        //This stops an infinite loop if there's a signal raise
+        //inside this function. It shouldn't happen, but better be safe.
+        exit(signum);
+    }
+    already_handling_signal = true;
+    
+    string bt_str = "Backtrace:\n";
+    vector<string> bt = get_backtrace();
+    for(size_t s = 0; s < bt.size(); ++s) {
+        bt_str += "    " + bt[s] + "\n";
+    }
+    if(bt_str.back() == '\n') {
+        bt_str.pop_back();
+    }
+    string signal_name(strsignal(signum));
+    string type_str = "Signal " + i2s(signum) + " (" + signal_name + ")";
+    
+    crash(type_str, bt_str, signum);
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Spews out a Pikmin from a given point. Used by Onions and converters.
+ * pos:
+ *   Point of origin.
+ * z:
+ *   Z of the point of origin.
+ * pik_type:
+ *   Type of the Pikmin to spew out.
+ * angle:
+ *   Direction in which to spew.
+ * horizontal_speed:
+ *   Horizontal speed in which to spew.
+ * vertical_speed:
+ *   Vertical speed in which to spew.
+ */
+void spew_pikmin_seed(
+    const point pos, const float z, pikmin_type* pik_type,
+    const float angle, const float horizontal_speed, const float vertical_speed
+) {
+    pikmin* new_pikmin =
+        (
+            (pikmin*)
+            create_mob(
+                game.mob_categories.get(MOB_CATEGORY_PIKMIN),
+                pos, pik_type, angle, ""
+            )
+        );
+    new_pikmin->z = z;
+    new_pikmin->speed.x = cos(angle) * horizontal_speed;
+    new_pikmin->speed.y = sin(angle) * horizontal_speed;
+    new_pikmin->speed_z = vertical_speed;
+    new_pikmin->fsm.set_state(PIKMIN_STATE_SEED);
+    new_pikmin->maturity = 0;
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Standardizes a path, making it use forward slashes instead of backslashes,
+ * and removing excess slashes at the end.
+ * path:
+ *   Path to standardize.
+ */
+string standardize_path(const string &path) {
+    string res = replace_all(path, "\\", "/");
+    if(res.back() == '/') res.pop_back();
+    return res;
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Starts the display of a text message.
+ * If the text is empty, it closes the message box.
+ * Any newline characters or slashes followed by n ("\n") will be used to
+ * separate the message into lines.
+ * text:
+ *   Text to display.
+ * speaker_bmp:
+ *   Bitmap representing the speaker.
+ */
+void start_message(string text, ALLEGRO_BITMAP* speaker_bmp) {
+    if(!text.empty()) {
+        game.states.gameplay_st->msg_box = new msg_box_info(text, speaker_bmp);
     } else {
-        return "Unknown";
+        delete game.states.gameplay_st->msg_box;
+        game.states.gameplay_st->msg_box = NULL;
     }
 }
 
+
+#if defined(_WIN32)
+
+/* ----------------------------------------------------------------------------
+ * An implementation of strsignal from POSIX.
+ * signum:
+ *   Signal number.
+ */
+string strsignal(const int signum) {
+    switch(signum) {
+    case SIGINT: {
+        return "SIGINT";
+    } case SIGILL: {
+        return "SIGILL";
+    } case SIGFPE: {
+        return "SIGFPE";
+    } case SIGSEGV: {
+        return "SIGSEGV";
+    } case SIGTERM: {
+        return "SIGTERM";
+    } case SIGBREAK: {
+        return "SIGBREAK";
+    } case SIGABRT: {
+        return "SIGABRT";
+    } case SIGABRT_COMPAT: {
+        return "SIGABRT_COMPAT";
+    } default: {
+        return "Unknown";
+    }
+    }
+}
+
+
 #endif //if defined(_WIN32)
+
+
+/* ----------------------------------------------------------------------------
+ * Unescapes a user string. This converts two backslashes into one, and
+ * converts backslash n into a newline character.
+ * s:
+ *   String to unescape.
+ */
+string unescape_string(const string &s) {
+    string ret;
+    ret.reserve(s.size());
+    for(size_t c = 0; c < s.size() - 1;) {
+        if(s[c] == '\\') {
+            switch(s[c + 1]) {
+            case 'n': {
+                ret.push_back('\n');
+                c += 2;
+                break;
+            } case '\\': {
+                ret.push_back('\\');
+                c += 2;
+                break;
+            } default: {
+                ret.push_back('\\');
+                ++c;
+                break;
+            }
+            }
+        } else {
+            ret.push_back(s[c]);
+            ++c;
+        }
+    }
+    ret.push_back(s.back());
+    return ret;
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Returns a string that's a join of the strings in the specified vector,
+ * but only past a certain position. The strings are joined with a space
+ * character.
+ * v:
+ *   The vector of strings.
+ * pos:
+ *   Use the string at this position and onward.
+ */
+string vector_tail_to_string(const vector<string> &v, const size_t pos) {
+    string result = v[pos];
+    for(size_t p = pos + 1; p < v.size(); ++p) {
+        result += " " + v[p];
+    }
+    return result;
+}

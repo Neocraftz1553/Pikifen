@@ -13,12 +13,21 @@
 
 #include <allegro5/allegro.h>
 
-#include "../data_file.h"
+#include "../utils/data_file.h"
 #include "mob_type.h"
+
 
 enum DECORATION_ANIMATIONS {
     DECORATION_ANIM_IDLING,
     DECORATION_ANIM_BUMPED,
+};
+
+
+enum DECORATION_STATES {
+    DECORATION_STATE_IDLING,
+    DECORATION_STATE_BUMPED,
+    
+    N_DECORATION_STATES,
 };
 
 
@@ -33,9 +42,9 @@ public:
     bool random_animation_delay;
     
     decoration_type();
-    ~decoration_type();
-    void load_parameters(data_node* file);
-    anim_conversion_vector get_anim_conversions();
+    void load_properties(data_node* file);
+    anim_conversion_vector get_anim_conversions() const;
 };
+
 
 #endif //ifndef DECORATION_TYPE_INCLUDED

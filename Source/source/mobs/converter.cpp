@@ -11,17 +11,24 @@
 #include "converter.h"
 
 #include "../functions.h"
+#include "../game.h"
 #include "../misc_structs.h"
-#include "../vars.h"
+
 
 /* ----------------------------------------------------------------------------
  * Creates a converter mob.
+ * pos:
+ *   Starting coordinates.
+ * type:
+ *   Convert type this mob belongs to.
+ * angle:
+ *   Starting angle.
  */
 converter::converter(
-    const point &pos, converter_type* con_type, const float angle
+    const point &pos, converter_type* type, const float angle
 ) :
-    mob(pos, con_type, angle),
-    con_type(con_type),
+    mob(pos, type, angle),
+    con_type(type),
     amount_in_buffer(0),
     input_pikmin_left(con_type->total_input_pikmin),
     current_type(con_type->available_pikmin_types[0]),
@@ -86,7 +93,6 @@ const float CONVERTER_SPEW_H_SPEED_DEVIATION = 10.0f;
 //A converter-spat seed is this quick, vertically.
 const float CONVERTER_SPEW_V_SPEED = 1200.0f;
 
-
 /* ----------------------------------------------------------------------------
  * Spews out the converted seeds.
  */
@@ -94,7 +100,12 @@ void converter::spew() {
     size_t total_to_spit = amount_in_buffer * con_type->pikmin_per_conversion;
     
     for(size_t s = 0; s < total_to_spit; ++s) {
-        if(pikmin_list.size() == max_pikmin_in_field) break;
+        if(
+            game.states.gameplay_st->mobs.pikmin_list.size() ==
+            game.config.max_pikmin_in_field
+        ) {
+            break;
+        }
         
         float horizontal_strength =
             CONVERTER_SPEW_H_SPEED +
@@ -118,8 +129,10 @@ void converter::spew() {
 
 /* ----------------------------------------------------------------------------
  * Ticks some logic specific to converters.
+ * delta_t:
+ *   How many seconds to tick by.
  */
-void converter::tick_class_specifics() {
+void converter::tick_class_specifics(const float delta_t) {
     type_change_timer.tick(delta_t);
     auto_conversion_timer.tick(delta_t);
 }

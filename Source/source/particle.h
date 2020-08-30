@@ -8,15 +8,19 @@
  * Header for the particle class and particle-related functions.
  */
 
-#ifndef PARTICLE_H
-#define PARTICLE_H
+#ifndef PARTICLE_INCLUDED
+#define PARTICLE_INCLUDED
 
 #include <vector>
 
 #include <allegro5/allegro.h>
 
-#include "world_component.h"
 #include "utils/geometry_utils.h"
+#include "world_component.h"
+
+
+using std::vector;
+
 
 class mob;
 
@@ -29,6 +33,7 @@ enum PARTICLE_TYPES {
     PARTICLE_TYPE_SMACK,
     PARTICLE_TYPE_DING,
 };
+
 
 enum PARTICLE_PRIORITIES {
     PARTICLE_PRIORITY_LOW,
@@ -92,6 +97,21 @@ struct particle {
  * Manages a list of particles, allows the addition of new ones, etc.
  */
 struct particle_manager {
+public:
+    void add(particle p);
+    void clear();
+    void fill_component_list(
+        vector<world_component> &list,
+        const point &cam_tl = point(), const point &cam_br = point()
+    );
+    size_t get_count() const;
+    void tick_all(const float delta_t);
+    
+    particle_manager(const size_t &max_nr = 0);
+    particle_manager(const particle_manager &pm2);
+    particle_manager &operator=(const particle_manager &pm2);
+    ~particle_manager();
+    
 private:
     //This list works as follows:
     //The first "count" particles are alive.
@@ -105,20 +125,6 @@ private:
     size_t max_nr;
     void remove(const size_t pos);
     
-public:
-    void add(particle p);
-    void clear();
-    void fill_component_list(
-        vector<world_component> &list,
-        const point &cam_tl = point(), const point &cam_br = point()
-    );
-    size_t get_count();
-    void tick_all(const float delta_t);
-    
-    particle_manager(const size_t &max_nr = 0);
-    particle_manager &operator=(const particle_manager &pg);
-    ~particle_manager();
-    
 };
 
 
@@ -127,9 +133,6 @@ public:
  * A particle generator creates particles in a steady flow and/or in a pattern.
  */
 struct particle_generator {
-private:
-    float emission_timer;
-    
 public:
     //Optional ID, if you need to identify it later on.
     size_t id;
@@ -169,6 +172,10 @@ public:
     void emit(particle_manager &manager);
     void reset();
     
+private:
+    float emission_timer;
+    
 };
 
-#endif //ifndef PARTICLE_H
+
+#endif //ifndef PARTICLE_INCLUDED

@@ -14,13 +14,6 @@
 #include "../mob_types/bridge_type.h"
 #include "mob.h"
 
-enum BRIDGE_STATES {
-    BRIDGE_STATE_IDLING,
-    BRIDGE_STATE_DESTROYED,
-    
-    N_BRIDGE_STATES,
-};
-
 
 /* ----------------------------------------------------------------------------
  * A bridge mob. Bridges on the engine are made up of two parts:
@@ -30,16 +23,16 @@ enum BRIDGE_STATES {
  * into walkable wood.
  */
 class bridge : public mob {
-private:
-
-    void get_neighbor_bridge_sectors(sector* s_ptr);
-    
 public:
+    //What type of bridge it is.
     bridge_type* bri_type;
+    
+    //Sectors it will affect when it opens.
     vector<sector*> secs;
     
+    //Constructor.
     bridge(const point &pos, bridge_type* bri_type, const float angle);
-    
 };
+
 
 #endif //ifndef BRIDGE_INCLUDED

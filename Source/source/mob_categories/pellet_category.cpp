@@ -12,8 +12,8 @@
 
 #include "pellet_category.h"
 
+#include "../game.h"
 #include "../mobs/pellet.h"
-#include "../vars.h"
 
 
 /* ----------------------------------------------------------------------------
@@ -22,29 +22,38 @@
 pellet_category::pellet_category() :
     mob_category(
         MOB_CATEGORY_PELLETS, "Pellet", "Pellets",
-        PELLETS_FOLDER_PATH, al_map_rgb(224, 255, 112)
+        "Pellets", al_map_rgb(73, 204, 126)
     ) {
     
 }
 
 
 /* ----------------------------------------------------------------------------
- * Returns all types of pellet by name.
+ * Clears the list of registered types of pellet.
  */
-void pellet_category::get_type_names(vector<string> &list) {
-    for(auto t = pellet_types.begin(); t != pellet_types.end(); ++t) {
-        list.push_back(t->first);
+void pellet_category::clear_types() {
+    for(auto &t : game.mob_types.pellet) {
+        delete t.second;
     }
+    game.mob_types.pellet.clear();
 }
 
 
 /* ----------------------------------------------------------------------------
- * Returns a type of pellet given its name, or NULL on error.
+ * Creates a pellet and adds it to the list of pellets.
+ * pos:
+ *   Starting coordinates.
+ * type:
+ *   Mob type.
+ * angle:
+ *   Starting angle.
  */
-mob_type* pellet_category::get_type(const string &name) {
-    auto it = pellet_types.find(name);
-    if(it == pellet_types.end()) return NULL;
-    return it->second;
+mob* pellet_category::create_mob(
+    const point &pos, mob_type* type, const float angle
+) {
+    pellet* m = new pellet(pos, (pellet_type*) type, angle);
+    game.states.gameplay_st->mobs.pellets.push_back(m);
+    return m;
 }
 
 
@@ -57,44 +66,50 @@ mob_type* pellet_category::create_type() {
 
 
 /* ----------------------------------------------------------------------------
- * Registers a created type of pellet.
- */
-void pellet_category::register_type(mob_type* type) {
-    pellet_types[type->name] = (pellet_type*) type;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Creates a pellet and adds it to the list of pellets.
- */
-mob* pellet_category::create_mob(
-    const point &pos, mob_type* type, const float angle
-) {
-    pellet* m = new pellet(pos, (pellet_type*) type, angle);
-    pellets.push_back(m);
-    return m;
-}
-
-
-/* ----------------------------------------------------------------------------
  * Clears a pellet from the list of pellets.
+ * m:
+ *   The mob to erase.
  */
 void pellet_category::erase_mob(mob* m) {
-    pellets.erase(
-        find(pellets.begin(), pellets.end(), (pellet*) m)
+    game.states.gameplay_st->mobs.pellets.erase(
+        find(
+            game.states.gameplay_st->mobs.pellets.begin(),
+            game.states.gameplay_st->mobs.pellets.end(),
+            (pellet*) m
+        )
     );
 }
 
 
 /* ----------------------------------------------------------------------------
- * Clears the list of registered types of pellet.
+ * Returns a type of pellet given its name, or NULL on error.
+ * name:
+ *   Name of the mob type to get.
  */
-void pellet_category::clear_types() {
-    for(auto t = pellet_types.begin(); t != pellet_types.end(); ++t) {
-        delete t->second;
-    }
-    pellet_types.clear();
+mob_type* pellet_category::get_type(const string &name) const {
+    auto it = game.mob_types.pellet.find(name);
+    if(it == game.mob_types.pellet.end()) return NULL;
+    return it->second;
 }
 
 
-pellet_category::~pellet_category() { }
+/* ----------------------------------------------------------------------------
+ * Returns all types of pellet by name.
+ * list:
+ *   This list gets filled with the mob type names.
+ */
+void pellet_category::get_type_names(vector<string> &list) const {
+    for(auto &t : game.mob_types.pellet) {
+        list.push_back(t.first);
+    }
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Registers a created type of pellet.
+ * type:
+ *   Mob type to register.
+ */
+void pellet_category::register_type(mob_type* type) {
+    game.mob_types.pellet[type->name] = (pellet_type*) type;
+}

@@ -1,5 +1,6 @@
 name = Beady Long Legs
 
+area_editor_tips = Make sure there is enough room for it to spawn its feet too!
 allow_ground_attacks = false
 can_free_move = true
 can_hunt = player; enemy
@@ -109,4 +110,3 @@ reaches {
 rotation_speed = 30
 target_type = enemy
 territory_radius = 300
-value = 300

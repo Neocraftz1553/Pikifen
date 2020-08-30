@@ -15,18 +15,6 @@
 #include "mob.h"
 
 
-enum CONVERTER_STATES {
-    CONVERTER_STATE_IDLING,
-    CONVERTER_STATE_BUMPING,
-    CONVERTER_STATE_CLOSING,
-    CONVERTER_STATE_SPITTING,
-    CONVERTER_STATE_OPENING,
-    CONVERTER_STATE_DYING,
-    
-    N_CONVERTER_STATES,
-};
-
-
 /* ----------------------------------------------------------------------------
  * A converter mob. This is like the Candypop Buds in the canon games, in the
  * sense that it converts a thrown Pikmin from one type into a Pikmin
@@ -34,23 +22,38 @@ enum CONVERTER_STATES {
  */
 class converter : public mob, public mob_with_anim_groups {
 public:
+    //What type of converter it is.
     converter_type* con_type;
     
+    //Amount of Pikmin currently inside the converter, in its "buffer".
     size_t amount_in_buffer;
+    //How many Pikmin are left until the converter dies.
     size_t input_pikmin_left;
+    //Type of Pikmin it will convert to right now.
     pikmin_type* current_type;
+    //If it cycles between types, this is the number of the current type.
     size_t current_type_nr;
+    //Time left before it cycles to the next type.
     timer type_change_timer;
+    //Time left before it auto-closes and converts the Pikmin in the buffer.
     timer auto_conversion_timer;
+    //Angle it will spit the next seed towards.
     float next_spew_angle;
     
+    //Change to the next type, if it cycles.
     void change_type();
+    //Close and start converting.
     void close();
+    //Spit a new seed.
     void spew();
     
+    //Constructor.
     converter(const point &pos, converter_type* con_type, const float angle);
-    virtual void tick_class_specifics();
     
+protected:
+    //Tick class-specific logic.
+    virtual void tick_class_specifics(const float delta_t);
 };
+
 
 #endif //ifndef CONVERTER_INCLUDED

@@ -13,9 +13,72 @@
 
 #include <allegro5/allegro.h>
 
-#include "../data_file.h"
 #include "../misc_structs.h"
+#include "../utils/data_file.h"
 #include "mob_type.h"
+
+
+enum LEADER_STATES {
+    LEADER_STATE_IDLING,
+    LEADER_STATE_ACTIVE,
+    LEADER_STATE_WHISTLING,
+    LEADER_STATE_PUNCHING,
+    LEADER_STATE_HOLDING,
+    LEADER_STATE_DISMISSING,
+    LEADER_STATE_SPRAYING,
+    LEADER_STATE_PAIN,
+    LEADER_STATE_INACTIVE_PAIN,
+    LEADER_STATE_KNOCKED_BACK,
+    LEADER_STATE_INACTIVE_KNOCKED_BACK,
+    LEADER_STATE_DYING,
+    LEADER_STATE_IN_GROUP_CHASING,
+    LEADER_STATE_IN_GROUP_STOPPED,
+    LEADER_STATE_GOING_TO_PLUCK,
+    LEADER_STATE_PLUCKING,
+    LEADER_STATE_INACTIVE_GOING_TO_PLUCK,
+    LEADER_STATE_INACTIVE_PLUCKING,
+    LEADER_STATE_SLEEPING_WAITING,
+    LEADER_STATE_SLEEPING_MOVING,
+    LEADER_STATE_SLEEPING_STUCK,
+    LEADER_STATE_INACTIVE_SLEEPING_WAITING,
+    LEADER_STATE_INACTIVE_SLEEPING_MOVING,
+    LEADER_STATE_INACTIVE_SLEEPING_STUCK,
+    //Time during which the leader is getting up.
+    LEADER_STATE_WAKING_UP,
+    //Time during which the leader is getting up.
+    LEADER_STATE_INACTIVE_WAKING_UP,
+    LEADER_STATE_HELD,
+    LEADER_STATE_THROWN,
+    LEADER_STATE_DRINKING,
+    LEADER_STATE_RIDING_TRACK,
+    LEADER_STATE_INACTIVE_RIDING_TRACK,
+    
+    N_LEADER_STATES,
+    
+};
+
+
+enum LEADER_ANIMATIONS {
+    LEADER_ANIM_IDLING,
+    LEADER_ANIM_WALKING,
+    LEADER_ANIM_PLUCKING,
+    LEADER_ANIM_GETTING_UP,
+    LEADER_ANIM_DISMISSING,
+    LEADER_ANIM_THROWING,
+    LEADER_ANIM_WHISTLING,
+    LEADER_ANIM_PUNCHING,
+    LEADER_ANIM_LYING,
+    LEADER_ANIM_PAIN,
+    LEADER_ANIM_KNOCKED_DOWN,
+    LEADER_ANIM_SPRAYING,
+    LEADER_ANIM_DRINKING,
+};
+
+
+const float LEADER_HELD_MOB_ANGLE = TAU / 2;
+const float LEADER_HELD_MOB_DIST = 1.2f;
+const float LEADER_INVULN_PERIOD = 1.5f;
+
 
 /* ----------------------------------------------------------------------------
  * A type of leader. The "leader" class is a mob, so the walking Olimar,
@@ -29,11 +92,6 @@
 class leader_type : public mob_type {
 public:
     float whistle_range;
-    unsigned int punch_strength;
-    //Time until the Pikmin is actually popped out of the ground.
-    float pluck_delay;
-    //When this leader is thrown, multiply the vertical throw strength by this.
-    float throw_strength_mult;
     float max_throw_height;
     
     sample_struct sfx_whistle;
@@ -43,11 +101,11 @@ public:
     ALLEGRO_BITMAP* bmp_icon; //Standby icon.
     
     leader_type();
-    ~leader_type();
-    void load_parameters(data_node* file);
+    void load_properties(data_node* file);
     void load_resources(data_node* file);
-    anim_conversion_vector get_anim_conversions();
+    anim_conversion_vector get_anim_conversions() const;
     void unload_resources();
 };
+
 
 #endif //ifndef LEADER_TYPE_INCLUDED

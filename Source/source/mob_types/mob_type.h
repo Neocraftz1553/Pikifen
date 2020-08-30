@@ -17,12 +17,16 @@
 #include <allegro5/allegro.h>
 
 #include "../animation.h"
-#include "../data_file.h"
 #include "../misc_structs.h"
 #include "../mob_categories/mob_category.h"
 #include "../mob_script.h"
+#include "../utils/data_file.h"
 
-using namespace std;
+
+using std::size_t;
+using std::string;
+using std::vector;
+
 
 enum ENEMY_EXTRA_STATES {
     ENEMY_EXTRA_STATE_CARRIABLE_WAITING,
@@ -31,7 +35,25 @@ enum ENEMY_EXTRA_STATES {
     ENEMY_EXTRA_STATE_BEING_DELIVERED,
 };
 
-typedef vector<pair<size_t, string> > anim_conversion_vector;
+
+//Area editor mob property types.
+enum AEMP_TYPES {
+    //Any user text.
+    AEMP_TEXT,
+    //Integer number.
+    AEMP_INT,
+    //Decimal number.
+    AEMP_DECIMAL,
+    //Boolean.
+    AEMP_BOOL,
+    //One of a list of strings.
+    AEMP_LIST,
+    //One of a list of numbers, though each has a name.
+    AEMP_NUMBER_LIST,
+};
+
+
+typedef vector<std::pair<size_t, string> > anim_conversion_vector;
 
 const size_t ANIM_IDLING = 0;
 
@@ -85,6 +107,7 @@ public:
         string hold_body_part;
         float hold_offset_dist;
         float hold_offset_angle;
+        unsigned char hold_rotation_method;
         
         bool handle_damage;
         bool relay_damage;
@@ -105,6 +128,7 @@ public:
             parent_holds(false),
             hold_offset_dist(0.0f),
             hold_offset_angle(0.0f),
+            hold_rotation_method(HOLD_ROTATION_METHOD_NEVER),
             handle_damage(false),
             relay_damage(false),
             handle_events(false),
@@ -116,62 +140,131 @@ public:
             limb_child_offset(0) {}
     };
     
+    //Info on a widget to present in the area editor,
+    //to better help users set the properties of a mob instance.
+    struct area_editor_prop_struct {
+        //Name of the widget.
+        string name;
+        //Variable it sets.
+        string var;
+        //What type of content this var has.
+        AEMP_TYPES type;
+        //Default value.
+        string def_value;
+        //Minimum value.
+        float min_value;
+        //Maximum value.
+        float max_value;
+        //If it's a list, this list the values.
+        vector<string> value_list;
+        //Tooltip to show on the widget, if any.
+        string tooltip;
+        area_editor_prop_struct();
+    };
+    
+    
     //Technical things.
+    //Its full name.
     string name;
+    //Name of the folder its data is on.
     string folder_name;
+    //Mob category.
     mob_category* category;
     
     //Visual things.
+    //Database with all its animation data.
     animation_database anims;
+    //A color that represents this mob.
     ALLEGRO_COLOR main_color;
+    //Show its health?
     bool show_health;
+    //Does it cast a shadow?
     bool casts_shadow;
     
     //Space-related things.
+    //Radius of the space it occupies.
     float radius;
+    //Height.
     float height;
+    //Moves these many units per second.
     float move_speed;
+    //Rotates these many radians per second.
     float rotation_speed;
+    //True if it can move in any direction, as opposed to just forward.
     bool can_free_move;
-    //If true, this mob is always active, even if it's off-camera.
-    bool always_active;
-    bool pushes; //Blocks passage of other mobs.
-    bool pushable; //Can be pushed by other mobs.
-    bool pushes_with_hitboxes; //Is the push via hitbox, or mob radius?
+    //Pushes other mobs (only those that can be pushed).
+    bool pushes;
+    //Can be pushed by other mobs.
+    bool pushable;
+    //If true, the push is via hitbox, as opposed to the mob's radius?
+    bool pushes_with_hitboxes;
+    //Can you walk on top of this mob?
     bool walkable;
+    //Rectangular dimensions, if it's meant to use them instead of a radius.
     point rectangular_dim;
     
     //Behavior things.
+    //Maximum health value.
     float max_health;
-    float health_regen; //Health points per second.
+    //Regenerates these many health points per second.
+    float health_regen;
+    //How far its territory reaches from the home point.
     float territory_radius;
+    //Information on all of its "reaches".
     vector<reach_struct> reaches;
+    //Information on everything it can spawn.
     vector<spawn_struct> spawns;
+    //Information on its children mobs.
     vector<child_struct> children;
+    //How many Pikmin can carry it, at most.
     size_t max_carriers;
-    float weight;          //Pikmin strength needed to carry it.
+    //Pikmin strength needed to carry it.
+    float weight;
+    //After it takes this much damage, it sends an "itch" event to the FSM.
     float itch_damage;
+    //Only send an "itch" event after these many seconds have passed.
     float itch_time;
+    //Other mobs decide if they can/want to hurt it by this target type.
     unsigned char target_type;
+    //What types of targets this mob can hunt down.
     uint16_t huntable_targets;
+    //What types of targets this mob can hurt.
     uint16_t hurtable_targets;
+    //Its initial team.
+    unsigned char starting_team;
     
     //Script things.
-    vector<mob_action_call*> init_actions; //Actions to run on spawn.
-    vector<mob_state*> states;        //The states, events and actions.
-    size_t first_state_nr;            //Number of the state a mob starts at.
-    string death_state_name;          //Name of the state to go to on death.
-    size_t death_state_nr;            //Number of the state to go to on death.
-    vector<string> states_ignoring_death; //States that ignore the death event.
-    vector<string> states_ignoring_spray; //States that ignore the spray event.
+    //Actions to run on spawn.
+    vector<mob_action_call*> init_actions;
+    //The states, events and actions. Basically, the FSM.
+    vector<mob_state*> states;
+    //Number of the state a mob starts at.
+    size_t first_state_nr;
+    //Name of the state to go to on death.
+    string death_state_name;
+    //Number of the state to go to on death.
+    size_t death_state_nr;
+    //States that ignore the death event.
+    vector<string> states_ignoring_death;
+    //States that ignore the spray event.
+    vector<string> states_ignoring_spray;
+    //Widgets to show on the area editor, to help parametrize each mob.
+    vector<area_editor_prop_struct> area_editor_props;
     
     //Misc.
+    //Tips to show in the area editor about this mob type, if any.
+    string area_editor_tips;
+    //Can the player choose to place one of these in the area editor?
     bool appears_in_area_editor;
-    bool is_obstacle;
+    //If true, carrier Pikmin will be considered blocked if it's in the way.
     bool blocks_carrier_pikmin;
+    //All damage received is multiplied by this much.
     float default_vulnerability;
+    //For every hazard, multiply damage taken by this much.
     map<hazard*, float> hazard_vulnerabilities;
+    //What sort of spike damage it causes, if any.
     spike_damage_type* spike_damage;
+    //For every type of spike damage, multiply damage taken by this much.
     map<spike_damage_type*, float> spike_damage_vulnerabilities;
     
     //Caches and such.
@@ -181,9 +274,9 @@ public:
     //General functions.
     mob_type(size_t category_id);
     virtual ~mob_type();
-    virtual void load_parameters(data_node* file);
+    virtual void load_properties(data_node* file);
     virtual void load_resources(data_node* file);
-    virtual anim_conversion_vector get_anim_conversions();
+    virtual anim_conversion_vector get_anim_conversions() const;
     virtual void unload_resources();
     void add_carrying_states();
 };
@@ -196,7 +289,7 @@ public:
  * dying red, etc. Because this would otherwise be a nightmare to organize,
  * this base class comes with some helpful functions and members.
  * A "group" is the "look" mentioned before, so "red", "yellow", "blue", etc.
- * The mob type should load a parameter somewhere that lists what suffixes to
+ * The mob type should load a property somewhere that lists what suffixes to
  * use for each group when loading animation names from the animation database.
  */
 class mob_type_with_anim_groups {
@@ -204,9 +297,9 @@ public:
     vector<string> animation_group_suffixes;
     anim_conversion_vector get_anim_conversions_with_groups(
         const anim_conversion_vector &v, const size_t base_anim_total
-    );
+    ) const;
     
-    virtual ~mob_type_with_anim_groups();
+    virtual ~mob_type_with_anim_groups() = default;
 };
 
 
@@ -219,5 +312,6 @@ void load_mob_type_from_file(
 );
 void unload_mob_types(const bool unload_resources);
 void unload_mob_types(mob_category* category, const bool unload_resources);
+
 
 #endif //ifndef MOB_TYPE_INCLUDED

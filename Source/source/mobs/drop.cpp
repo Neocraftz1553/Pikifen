@@ -12,14 +12,22 @@
 
 #include "drop.h"
 
-#include "../vars.h"
+#include "../drawing.h"
+#include "../game.h"
+
 
 /* ----------------------------------------------------------------------------
  * Creates a drop mob.
+ * pos:
+ *   Starting coordinates.
+ * type:
+ *   Drop type this mob belongs to.
+ * angle:
+ *   Starting angle.
  */
-drop::drop(const point &pos, drop_type* dro_type, const float angle) :
-    mob(pos, dro_type, angle),
-    dro_type(dro_type),
+drop::drop(const point &pos, drop_type* type, const float angle) :
+    mob(pos, type, angle),
+    dro_type(type),
     cur_scale(1.0),
     doses_left(dro_type->total_doses) {
     
@@ -31,29 +39,25 @@ drop::drop(const point &pos, drop_type* dro_type, const float angle) :
  * Draws a drop, but with its size reflecting the doses left or
  * the process of vanishing.
  */
-void drop::draw_mob(bitmap_effect_manager* effect_manager) {
-    bitmap_effect_manager internal_manager;
-    if(!effect_manager) {
-        effect_manager = &internal_manager;
-    }
+void drop::draw_mob() {
+    sprite* s_ptr = anim.get_cur_sprite();
+    if(!s_ptr) return;
     
-    bitmap_effect_props shrink_effect_props;
-    shrink_effect_props.scale.x = cur_scale;
-    shrink_effect_props.scale.y = cur_scale;
+    bitmap_effect_info eff;
+    get_sprite_bitmap_effects(s_ptr, &eff, true, true);
     
-    bitmap_effect shrink_effect;
-    shrink_effect.add_keyframe(0, shrink_effect_props);
+    eff.scale *= cur_scale;
     
-    effect_manager->add_effect(shrink_effect);
-    
-    mob::draw_mob(effect_manager);
+    draw_bitmap_with_effects(s_ptr->bitmap, eff);
 }
 
 
 /* ----------------------------------------------------------------------------
  * Ticks some logic specific to drops.
+ * delta_t:
+ *   How many seconds to tick by.
  */
-void drop::tick_class_specifics() {
+void drop::tick_class_specifics(const float delta_t) {
     float intended_scale;
     
     if(doses_left == dro_type->total_doses) {
@@ -67,14 +71,14 @@ void drop::tick_class_specifics() {
     
     if(cur_scale > intended_scale) {
         cur_scale -= dro_type->shrink_speed * delta_t;
-        cur_scale = max(intended_scale, cur_scale);
+        cur_scale = std::max(intended_scale, cur_scale);
     }
     
     if(cur_scale == 0) {
         //Disappeared into nothingness. Time to delete...if it's not being used.
         
-        for(size_t m = 0; m < mobs.size(); ++m) {
-            if(mobs[m]->focused_mob == this) {
+        for(size_t m = 0; m < game.states.gameplay_st->mobs.all.size(); ++m) {
+            if(game.states.gameplay_st->mobs.all[m]->focused_mob == this) {
                 return;
             }
         }

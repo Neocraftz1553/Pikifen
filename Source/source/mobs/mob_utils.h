@@ -18,10 +18,31 @@
 
 #include "../animation.h"
 #include "../misc_structs.h"
+#include "../mob_types/bouncer_type.h"
+#include "../mob_types/bridge_type.h"
+#include "../mob_types/converter_type.h"
+#include "../mob_types/decoration_type.h"
+#include "../mob_types/drop_type.h"
+#include "../mob_types/enemy_type.h"
+#include "../mob_types/group_task_type.h"
+#include "../mob_types/interactable_type.h"
+#include "../mob_types/leader_type.h"
+#include "../mob_types/onion_type.h"
+#include "../mob_types/pellet_type.h"
+#include "../mob_types/pikmin_type.h"
+#include "../mob_types/pile_type.h"
+#include "../mob_types/resource_type.h"
+#include "../mob_types/scale_type.h"
+#include "../mob_types/ship_type.h"
+#include "../mob_types/tool_type.h"
+#include "../mob_types/track_type.h"
+#include "../mob_types/treasure_type.h"
 #include "../sector.h"
 #include "../utils/geometry_utils.h"
 
-using namespace std;
+
+using std::size_t;
+using std::vector;
 
 class mob;
 
@@ -30,6 +51,7 @@ enum CARRY_SPOT_STATES {
     CARRY_SPOT_RESERVED,
     CARRY_SPOT_USED,
 };
+
 
 enum CARRY_DESTINATIONS {
     CARRY_DESTINATION_SHIP,
@@ -71,10 +93,6 @@ struct carry_info_struct {
     //of spaces reserved. A Pikmin could be on its way to its spot,
     //not necessarily there already.
     size_t cur_n_carriers;
-    //When stuck, look out for these obstacles. They may fix the situation.
-    unordered_set<mob*> obstacle_ptrs;
-    //Are the Pikmin stuck with nowhere to go?
-    bool is_stuck;
     //Is the object moving at the moment?
     bool is_moving;
     //When the object begins moving, the idea is to carry it to this mob.
@@ -89,11 +107,37 @@ struct carry_info_struct {
     float return_dist;
     
     carry_info_struct(mob* m, const size_t destination);
-    bool is_empty();
-    bool is_full();
-    float get_speed();
+    bool is_empty() const;
+    bool is_full() const;
+    float get_speed() const;
     void rotate_points(const float angle);
-    ~carry_info_struct();
+};
+
+
+/* ----------------------------------------------------------------------------
+ * Structure with information on what point the mob is chasing after.
+ */
+struct chase_info_struct {
+    //If true, the mob is trying to go to a certain spot.
+    bool is_chasing;
+    //Chase after these coordinates, relative to the "origin" coordinates.
+    point offset;
+    //Pointer to the origin of the coordinates, or NULL for the world origin.
+    point* orig_coords;
+    //When chasing something in teleport mode, also change the z accordingly.
+    float* teleport_z;
+    //If true, teleport instantly.
+    bool teleport;
+    //If true, the mob can move in a direction it's not facing.
+    bool free_move;
+    //Distance from the target in which the mob is considered as being there.
+    float target_dist;
+    //Speed to move towards the target at.
+    float speed;
+    //If true, the mob successfully reached its intended destination.
+    bool reached_destination;
+    
+    chase_info_struct();
 };
 
 
@@ -129,7 +173,7 @@ struct circling_info_struct {
  * and the location and info of the spots in the
  * circle, when the members are following the mob.
  */
-struct group_info {
+struct group_info_struct {
 
     struct group_spot {
         point pos; //Relative to the anchor.
@@ -149,11 +193,11 @@ struct group_info {
     void init_spots(mob* affected_mob_ptr = NULL);
     void sort(subgroup_type* leading_type);
     void change_standby_type_if_needed();
-    point get_average_member_pos();
-    point get_spot_offset(const size_t spot_index);
+    point get_average_member_pos() const;
+    point get_spot_offset(const size_t spot_index) const;
     void reassign_spots();
     bool set_next_cur_standby_type(const bool move_backwards);
-    group_info(mob* leader_ptr);
+    group_info_struct(mob* leader_ptr);
 };
 
 
@@ -173,17 +217,93 @@ struct hold_info_struct {
     float offset_angle;
     //Is the mob drawn above the holder?
     bool above_holder;
+    //How should the held object rotate? Use HOLD_ROTATION_METHOD_*.
+    unsigned char rotation_method;
     
     hold_info_struct();
     void clear();
-    point get_final_pos(float* final_z);
+    point get_final_pos(float* final_z) const;
+};
+
+
+class bouncer;
+class bridge;
+class converter;
+class decoration;
+class drop;
+class enemy;
+class group_task;
+class interactable;
+class leader;
+class onion;
+class pellet;
+class pikmin;
+class pile;
+class resource;
+class scale;
+class ship;
+class tool;
+class track;
+class treasure;
+
+/* ----------------------------------------------------------------------------
+ * Lists of all mobs in the area.
+ */
+struct mob_lists {
+    vector<mob*> all;
+    vector<bouncer*> bouncers;
+    vector<bridge*> bridges;
+    vector<converter*> converters;
+    vector<decoration*> decorations;
+    vector<drop*> drops;
+    vector<enemy*> enemies;
+    vector<group_task*> group_tasks;
+    vector<interactable*> interactables;
+    vector<leader*> leaders;
+    vector<onion*> onions;
+    vector<pellet*> pellets;
+    vector<pikmin*> pikmin_list;
+    vector<pile*> piles;
+    vector<resource*> resources;
+    vector<scale*> scales;
+    vector<ship*> ships;
+    vector<tool*> tools;
+    vector<track*> tracks;
+    vector<treasure*> treasures;
+};
+
+
+/* ----------------------------------------------------------------------------
+ * Lists of all mob types.
+ */
+struct mob_type_lists {
+    map<string, bouncer_type*> bouncer;
+    map<string, bridge_type*> bridge;
+    map<string, converter_type*> converter;
+    map<string, mob_type*> custom;
+    map<string, decoration_type*> decoration;
+    map<string, drop_type*> drop;
+    map<string, enemy_type*> enemy;
+    map<string, group_task_type*> group_task;
+    map<string, interactable_type*> interactable;
+    map<string, leader_type*> leader;
+    map<string, onion_type*> onion;
+    map<string, pellet_type*> pellet;
+    map<string, pikmin_type*> pikmin;
+    map<string, pile_type*> pile;
+    map<string, resource_type*> resource;
+    map<string, scale_type*> scale;
+    map<string, ship_type*> ship;
+    map<string, tool_type*> tool;
+    map<string, track_type*> track;
+    map<string, treasure_type*> treasure;
 };
 
 
 /* ----------------------------------------------------------------------------
  * Structure with information about this mob's parent, if any.
  */
-struct parent_mob_info {
+struct parent_info_struct {
     mob* m;
     bool handle_damage;
     bool relay_damage;
@@ -201,7 +321,7 @@ struct parent_mob_info {
     float limb_child_offset;
     unsigned char limb_draw_method;
     
-    parent_mob_info(mob* m);
+    parent_info_struct(mob* m);
 };
 
 
@@ -218,23 +338,41 @@ struct path_info_struct {
     vector<path_stop*> path;
     //Index of the current stop in the projected carrying path.
     size_t cur_path_stop_nr;
-    //List of all obstacles located somewhere in the path.
-    unordered_set<mob*> obstacle_ptrs;
     //If true, it's best to go straight to the target point
     //instead of taking a path.
     bool go_straight;
     //For the chase from the final path stop to the target, use this
     //value in the target_distance parameter.
     float final_target_distance;
+    //Is the way forward currently blocked?
+    bool is_blocked;
     
     path_info_struct(mob* m, const point &target);
+    bool check_blockage();
+};
+
+
+/* ----------------------------------------------------------------------------
+ * Structure with information about the track mob that a mob is currently
+ * riding. Includes things like current progress.
+ */
+struct track_info_struct {
+    //Pointer to the track mob.
+    mob* m;
+    //Current checkpoint of the track. This is the last checkpoint crossed.
+    size_t cur_cp_nr;
+    //Progress within the current checkpoint. 0 means at the checkpoint.
+    //1 means it's at the next checkpoint.
+    float cur_cp_progress;
+    
+    track_info_struct(mob* m);
 };
 
 
 mob* create_mob(
     mob_category* category, const point &pos, mob_type* type,
     const float angle, const string &vars,
-    function<void(mob*)> code_after_creation = nullptr
+    std::function<void(mob*)> code_after_creation = nullptr
 );
 void delete_mob(mob* m, const bool complete_destruction = false);
 string get_error_message_mob_info(mob* m);

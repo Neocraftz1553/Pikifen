@@ -12,8 +12,8 @@
 
 #include "resource_category.h"
 
+#include "../game.h"
 #include "../mobs/resource.h"
-#include "../vars.h"
 
 
 /* ----------------------------------------------------------------------------
@@ -22,29 +22,38 @@
 resource_category::resource_category() :
     mob_category(
         MOB_CATEGORY_RESOURCES, "Resource", "Resources",
-        RESOURCES_FOLDER_PATH, al_map_rgb(203, 88, 56)
+        "Resources", al_map_rgb(139, 204, 204)
     ) {
     
 }
 
 
 /* ----------------------------------------------------------------------------
- * Returns all types of resource by name.
+ * Clears the list of registered types of resource.
  */
-void resource_category::get_type_names(vector<string> &list) {
-    for(auto t = resource_types.begin(); t != resource_types.end(); ++t) {
-        list.push_back(t->first);
+void resource_category::clear_types() {
+    for(auto &t : game.mob_types.resource) {
+        delete t.second;
     }
+    game.mob_types.resource.clear();
 }
 
 
 /* ----------------------------------------------------------------------------
- * Returns a type of resource given its name, or NULL on error.
+ * Creates a resource and adds it to the list of resources.
+ * pos:
+ *   Starting coordinates.
+ * type:
+ *   Mob type.
+ * angle:
+ *   Starting angle.
  */
-mob_type* resource_category::get_type(const string &name) {
-    auto it = resource_types.find(name);
-    if(it == resource_types.end()) return NULL;
-    return it->second;
+mob* resource_category::create_mob(
+    const point &pos, mob_type* type, const float angle
+) {
+    resource* m = new resource(pos, (resource_type*) type, angle);
+    game.states.gameplay_st->mobs.resources.push_back(m);
+    return m;
 }
 
 
@@ -57,44 +66,50 @@ mob_type* resource_category::create_type() {
 
 
 /* ----------------------------------------------------------------------------
- * Registers a created type of resource.
- */
-void resource_category::register_type(mob_type* type) {
-    resource_types[type->name] = (resource_type*) type;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Creates a resource and adds it to the list of resources.
- */
-mob* resource_category::create_mob(
-    const point &pos, mob_type* type, const float angle
-) {
-    resource* m = new resource(pos, (resource_type*) type, angle);
-    resources.push_back(m);
-    return m;
-}
-
-
-/* ----------------------------------------------------------------------------
  * Clears a resource from the list of resources.
+ * m:
+ *   The mob to erase.
  */
 void resource_category::erase_mob(mob* m) {
-    resources.erase(
-        find(resources.begin(), resources.end(), (resource*) m)
+    game.states.gameplay_st->mobs.resources.erase(
+        find(
+        game.states.gameplay_st->mobs.resources.begin(), 
+        game.states.gameplay_st->mobs.resources.end(), 
+        (resource*) m
+        )
     );
 }
 
 
 /* ----------------------------------------------------------------------------
- * Clears the list of registered types of resource.
+ * Returns a type of resource given its name, or NULL on error.
+ * name:
+ *   Name of the mob type to get.
  */
-void resource_category::clear_types() {
-    for(auto t = resource_types.begin(); t != resource_types.end(); ++t) {
-        delete t->second;
-    }
-    resource_types.clear();
+mob_type* resource_category::get_type(const string &name) const {
+    auto it = game.mob_types.resource.find(name);
+    if(it == game.mob_types.resource.end()) return NULL;
+    return it->second;
 }
 
 
-resource_category::~resource_category() { }
+/* ----------------------------------------------------------------------------
+ * Returns all types of resource by name.
+ * list:
+ *   This list gets filled with the mob type names.
+ */
+void resource_category::get_type_names(vector<string> &list) const {
+    for(auto &t : game.mob_types.resource) {
+        list.push_back(t.first);
+    }
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Registers a created type of resource.
+ * type:
+ *   Mob type to register.
+ */
+void resource_category::register_type(mob_type* type) {
+    game.mob_types.resource[type->name] = (resource_type*) type;
+}

@@ -17,10 +17,9 @@
 #include "../const.h"
 #include "../mob_categories/mob_category.h"
 
-using namespace std;
 
-
-const string ONIONS_FOLDER_PATH = TYPES_FOLDER_PATH + "/Onions";
+using std::string;
+using std::vector;
 
 
 /* ----------------------------------------------------------------------------
@@ -28,8 +27,8 @@ const string ONIONS_FOLDER_PATH = TYPES_FOLDER_PATH + "/Onions";
  */
 class onion_category : public mob_category {
 public:
-    virtual void get_type_names(vector<string> &list);
-    virtual mob_type* get_type(const string &name);
+    virtual void get_type_names(vector<string> &list) const;
+    virtual mob_type* get_type(const string &name) const;
     virtual mob_type* create_type();
     virtual void register_type(mob_type* type);
     virtual mob* create_mob(
@@ -39,7 +38,7 @@ public:
     virtual void clear_types();
     
     onion_category();
-    ~onion_category();
 };
+
 
 #endif //ifndef ONION_CATEGORY_INCLUDED

@@ -11,6 +11,7 @@
 #include "drop_type.h"
 
 #include "../functions.h"
+#include "../game.h"
 #include "../mob_fsms/drop_fsm.h"
 
 
@@ -33,34 +34,51 @@ drop_type::drop_type() :
 }
 
 
-drop_type::~drop_type() { }
+/* ----------------------------------------------------------------------------
+ * Returns the vector of animation conversions.
+ */
+anim_conversion_vector drop_type::get_anim_conversions() const {
+    anim_conversion_vector v;
+    v.push_back(std::make_pair(DROP_ANIM_IDLING, "idling"));
+    v.push_back(std::make_pair(DROP_ANIM_FALLING, "falling"));
+    v.push_back(std::make_pair(DROP_ANIM_LANDING, "landing"));
+    v.push_back(std::make_pair(DROP_ANIM_BUMPED, "bumped"));
+    return v;
+}
 
 
 /* ----------------------------------------------------------------------------
- * Loads parameters from a data file.
+ * Loads properties from a data file.
+ * file:
+ *   File to read from.
  */
-void drop_type::load_parameters(data_node* file) {
+void drop_type::load_properties(data_node* file) {
     reader_setter rs(file);
     
     string consumer_str;
     string effect_str;
     string spray_name_str;
     string status_name_str;
+    data_node* consumer_node = NULL;
+    data_node* effect_node = NULL;
+    data_node* spray_name_node = NULL;
+    data_node* status_name_node = NULL;
+    data_node* total_doses_node = NULL;
     
-    rs.set("consumer", consumer_str);
-    rs.set("effect", effect_str);
-    rs.set("total_doses", total_doses);
+    rs.set("consumer", consumer_str, &consumer_node);
+    rs.set("effect", effect_str, &effect_node);
     rs.set("increase_amount", increase_amount);
-    rs.set("spray_type_to_increase", spray_name_str);
-    rs.set("status_to_give", status_name_str);
     rs.set("shrink_speed", shrink_speed);
+    rs.set("spray_type_to_increase", spray_name_str, &spray_name_node);
+    rs.set("status_to_give", status_name_str, &status_name_node);
+    rs.set("total_doses", total_doses, &total_doses_node);
     
     if(consumer_str == "pikmin") {
         consumer = DROP_CONSUMER_PIKMIN;
     } else if(consumer_str == "leaders") {
         consumer = DROP_CONSUMER_LEADERS;
     } else {
-        log_error("Unknown consumer \"" + consumer_str + "\"!", file);
+        log_error("Unknown consumer \"" + consumer_str + "\"!", consumer_node);
     }
     
     if(effect_str == "maturate") {
@@ -70,46 +88,41 @@ void drop_type::load_parameters(data_node* file) {
     } else if(effect_str == "give_status") {
         effect = DROP_EFFECT_GIVE_STATUS;
     } else {
-        log_error("Unknown drop effect \"" + effect_str + "\"!", file);
+        log_error("Unknown drop effect \"" + effect_str + "\"!", effect_node);
     }
     
     if(effect == DROP_EFFECT_INCREASE_SPRAYS) {
-        for(size_t s = 0; s < spray_types.size(); ++s) {
-            if(spray_types[s].name == spray_name_str) {
+        for(size_t s = 0; s < game.spray_types.size(); ++s) {
+            if(game.spray_types[s].name == spray_name_str) {
                 spray_type_to_increase = s;
                 break;
             }
         }
         if(spray_type_to_increase == INVALID) {
-            log_error("Unknown spray type \"" + spray_name_str + "\"!", file);
+            log_error(
+                "Unknown spray type \"" + spray_name_str + "\"!",
+                spray_name_node
+            );
         }
     }
     
-    if(!status_name_str.empty()) {
-        auto s = status_types.find(status_name_str);
-        if(s != status_types.end()) {
-            status_to_give = &(s->second);
+    if(status_name_node) {
+        auto s = game.status_types.find(status_name_str);
+        if(s != game.status_types.end()) {
+            status_to_give = s->second;
         } else {
-            log_error("Unknown status type \"" + status_name_str + "\"!", file);
+            log_error(
+                "Unknown status type \"" + status_name_str + "\"!",
+                status_name_node
+            );
         }
     }
     
     if(total_doses == 0) {
-        log_error("The number of total doses cannot be zero!", file);
+        log_error(
+            "The number of total doses cannot be zero!", total_doses_node
+        );
     }
     
     shrink_speed /= 100.0f;
-}
-
-
-/* ----------------------------------------------------------------------------
- * Returns the vector of animation conversions.
- */
-anim_conversion_vector drop_type::get_anim_conversions() {
-    anim_conversion_vector v;
-    v.push_back(make_pair(DROP_ANIM_IDLING, "idling"));
-    v.push_back(make_pair(DROP_ANIM_FALLING, "falling"));
-    v.push_back(make_pair(DROP_ANIM_LANDING, "landing"));
-    v.push_back(make_pair(DROP_ANIM_BUMPED, "bumped"));
-    return v;
 }

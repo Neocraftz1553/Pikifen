@@ -18,74 +18,13 @@ class leader;
 #include "leader.h"
 #include "onion.h"
 
-enum PIKMIN_STATES {
-    PIKMIN_STATE_IN_GROUP_CHASING,
-    PIKMIN_STATE_IN_GROUP_STOPPED,
-    PIKMIN_STATE_GROUP_MOVE_CHASING,
-    PIKMIN_STATE_GROUP_MOVE_STOPPED,
-    PIKMIN_STATE_IDLING,
-    PIKMIN_STATE_SEED,
-    PIKMIN_STATE_SPROUT,
-    PIKMIN_STATE_PLUCKING,
-    PIKMIN_STATE_GRABBED_BY_LEADER,
-    PIKMIN_STATE_GRABBED_BY_ENEMY,
-    PIKMIN_STATE_KNOCKED_BACK,
-    PIKMIN_STATE_THROWN,
-    PIKMIN_STATE_GOING_TO_DISMISS_SPOT,
-    PIKMIN_STATE_PICKING_UP,
-    PIKMIN_STATE_SIGHING,
-    PIKMIN_STATE_CARRYING,
-    PIKMIN_STATE_RETURNING,
-    PIKMIN_STATE_ATTACKING_GROUNDED,
-    PIKMIN_STATE_ATTACKING_LATCHED,
-    PIKMIN_STATE_GOING_TO_CARRIABLE_OBJECT,
-    PIKMIN_STATE_GOING_TO_TOOL,
-    PIKMIN_STATE_GOING_TO_OPPONENT,
-    PIKMIN_STATE_DISABLED,
-    PIKMIN_STATE_FLAILING,
-    PIKMIN_STATE_PANICKING,
-    PIKMIN_STATE_DRINKING,
-    PIKMIN_STATE_CELEBRATING,
-    PIKMIN_STATE_IN_GROUP_CHASING_H,
-    PIKMIN_STATE_IN_GROUP_STOPPED_H,
-    PIKMIN_STATE_GROUP_MOVE_CHASING_H,
-    PIKMIN_STATE_GROUP_MOVE_STOPPED_H,
-    PIKMIN_STATE_IDLING_H,
-    PIKMIN_STATE_GRABBED_BY_LEADER_H,
-    PIKMIN_STATE_THROWN_H,
-    PIKMIN_STATE_GOING_TO_DISMISS_SPOT_H,
-    
-    N_PIKMIN_STATES
-};
-
-enum PIKMIN_ANIMATIONS {
-    PIKMIN_ANIM_IDLING,
-    PIKMIN_ANIM_WALKING,
-    PIKMIN_ANIM_THROWN,
-    PIKMIN_ANIM_ATTACKING,
-    PIKMIN_ANIM_GRABBING,
-    PIKMIN_ANIM_CARRYING,
-    PIKMIN_ANIM_SIGHING,
-    PIKMIN_ANIM_SPROUT,
-    PIKMIN_ANIM_PLUCKING,
-    PIKMIN_ANIM_LYING,
-    PIKMIN_ANIM_DRINKING,
-    PIKMIN_ANIM_PICKING_UP,
-};
-
-const float PIKMIN_GOTO_TIMEOUT = 5.0f;
-const float PIKMIN_INVULN_PERIOD = 0.7f;
-const float PIKMIN_PANIC_CHASE_INTERVAL = 0.2f;
-
 
 /* ----------------------------------------------------------------------------
  * The eponymous Pikmin.
  */
 class pikmin : public mob {
 public:
-    pikmin(const point &pos, pikmin_type* type, const float angle);
-    ~pikmin();
-    
+    //What type of Pikmin it is.
     pikmin_type* pik_type;
     
     //Mob that it is carrying.
@@ -113,22 +52,40 @@ public:
     //How many hits in a row have done no damage.
     unsigned char consecutive_dud_hits;
     
+    //Forces the Pikmin to carry a mob.
     void force_carry(mob* m);
+    //Checks and processes an attack's miss.
     bool process_attack_miss(hitbox_interaction* info);
+    //Increases the Pikmin's maturity by an amount.
     void increase_maturity(const int amount);
+    //Starts the trail behind a thrown Pikmin.
+    void start_throw_trail();
     
-    virtual bool can_receive_status(status_type* s);
-    virtual void draw_mob(bitmap_effect_manager* effect_manager = NULL);
-    virtual float get_base_speed();
-    virtual void lose_panic_from_status();
+    //Constructor.
+    pikmin(const point &pos, pikmin_type* type, const float angle);
+    
+    //Can the mob currently receive the specified status effect?
+    virtual bool can_receive_status(status_type* s) const;
+    //Mob drawing routine.
+    virtual void draw_mob();
+    //Get the base movement speed.
+    virtual float get_base_speed() const;
+    //Handler for when there is no longer any status effect-induced panic.
+    virtual void handle_panic_loss();
+    //Handler for a status effect.
     virtual void handle_status_effect(status_type* s);
-    virtual void read_script_vars(const string &vars);
-    virtual void tick_class_specifics();
+    //Read script variables from the area data.
+    virtual void read_script_vars(const script_var_reader &svr);
+    
+protected:
+    //Tick class-specific logic.
+    virtual void tick_class_specifics(const float delta_t);
 };
 
 
 pikmin* get_closest_sprout(
     const point &pos, dist* d, const bool ignore_reserved
 );
+
 
 #endif //ifndef PIKMIN_INCLUDED

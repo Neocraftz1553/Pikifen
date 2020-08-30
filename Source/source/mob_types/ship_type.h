@@ -13,13 +13,22 @@
 
 #include <allegro5/allegro.h>
 
-#include "../data_file.h"
 #include "../misc_structs.h"
+#include "../utils/data_file.h"
 #include "mob_type.h"
+
 
 enum SHIP_ANIMATIONS {
     SHIP_ANIM_IDLING,
 };
+
+
+enum SHIP_STATES {
+    SHIP_STATE_IDLING,
+    
+    N_SHIP_STATES,
+};
+
 
 /* ----------------------------------------------------------------------------
  * A type of ship (Hocotate ship, research pod, golden HS, S.S. Drake, etc.).
@@ -32,9 +41,9 @@ public:
     float beam_radius;
     
     ship_type();
-    ~ship_type();
-    void load_parameters(data_node* file);
-    anim_conversion_vector get_anim_conversions();
+    void load_properties(data_node* file);
+    anim_conversion_vector get_anim_conversions() const;
 };
+
 
 #endif //ifndef SHIP_TYPE_INCLUDED

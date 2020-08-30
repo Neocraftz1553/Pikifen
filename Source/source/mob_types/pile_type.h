@@ -13,16 +13,25 @@
 
 #include <allegro5/allegro.h>
 
-#include "../data_file.h"
 #include "../misc_structs.h"
+#include "../utils/data_file.h"
 #include "mob_type.h"
 #include "resource_type.h"
+
 
 enum PILE_ANIMATIONS {
     PILE_ANIM_IDLING,
     
     N_PILE_ANIMS,
 };
+
+
+enum PILE_STATES {
+    PILE_STATE_IDLING,
+    
+    N_PILE_STATES,
+};
+
 
 /* ----------------------------------------------------------------------------
  * A type of resource pile (gold nugget pile, Burgeoning Spiderwort, etc.).
@@ -40,9 +49,9 @@ public:
     bool delete_when_finished;
     
     pile_type();
-    ~pile_type();
-    void load_parameters(data_node* file);
-    anim_conversion_vector get_anim_conversions();
+    void load_properties(data_node* file);
+    anim_conversion_vector get_anim_conversions() const;
 };
+
 
 #endif //ifndef PILE_TYPE_INCLUDED

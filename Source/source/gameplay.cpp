@@ -17,20 +17,45 @@
 
 #include "drawing.h"
 #include "functions.h"
+#include "game.h"
 #include "load.h"
 #include "misc_structs.h"
 #include "utils/string_utils.h"
-#include "vars.h"
+
 
 //How long the HUD moves for when the area is entered.
 const float gameplay::AREA_INTRO_HUD_MOVE_TIME = 3.0f;
-
+//How long it takes for the area name to fade away, in-game.
+const float gameplay::AREA_TITLE_FADE_DURATION = 3.0f;
+//How fast the "invalid cursor" effect goes, per second.
+const float gameplay::CURSOR_INVALID_EFFECT_SPEED = TAU * 2;
+//Every X seconds, the cursor's position is saved, to create the trail effect.
+const float gameplay::CURSOR_SAVE_INTERVAL = 0.03f;
+//Swarming arrows move these many units per second.
+const float gameplay::SWARM_ARROW_SPEED = 400.0f;
+//Seconds that need to pass before another swarm arrow appears.
+const float gameplay::SWARM_ARROWS_INTERVAL = 0.1f;
 
 /* ----------------------------------------------------------------------------
  * Creates the "gameplay" state.
  */
 gameplay::gameplay() :
     game_state(),
+    area_time_passed(0.0f),
+    area_title_fade_timer(AREA_TITLE_FADE_DURATION),
+    closest_group_member(nullptr),
+    closest_group_member_distant(false),
+    cur_leader_nr(0),
+    cur_leader_ptr(nullptr),
+    day_minutes(0.0f),
+    hud_items(N_HUD_ITEMS),
+    leader_cursor_mob(nullptr),
+    leader_cursor_sector(nullptr),
+    msg_box(nullptr),
+    particles(0),
+    precipitation(0),
+    swarm_angle(0),
+    swarm_magnitude(0.0f),
     bmp_bubble(nullptr),
     bmp_counter_bubble_group(nullptr),
     bmp_counter_bubble_field(nullptr),
@@ -42,14 +67,77 @@ gameplay::gameplay() :
     bmp_hard_bubble(nullptr),
     bmp_message_box(nullptr),
     bmp_no_pikmin_bubble(nullptr),
-    bmp_sun(nullptr) {
+    bmp_sun(nullptr),
+    cancel_control_id(INVALID),
+    close_to_interactable_to_use(nullptr),
+    close_to_onion_to_open(nullptr),
+    close_to_pikmin_to_pluck(nullptr),
+    close_to_ship_to_heal(nullptr),
+    cursor_height_diff_light(0.0f),
+    cursor_save_timer(CURSOR_SAVE_INTERVAL),
+    day(1),
+    is_input_allowed(false),
+    lightmap_bmp(nullptr),
+    main_control_id(INVALID),
+    paused(false),
+    ready_for_input(false),
+    selected_spray(0),
+    swarm_next_arrow_timer(SWARM_ARROWS_INTERVAL),
+    swarm_cursor(false),
+    throw_can_reach_cursor(true) {
     
+    swarm_next_arrow_timer.on_end = [this] () {
+        swarm_next_arrow_timer.start();
+        swarm_arrows.push_back(0);
+    };
+    swarm_next_arrow_timer.start();
 }
+
+
+/* ----------------------------------------------------------------------------
+ * Draw the gameplay.
+ */
+void gameplay::do_drawing() {
+    do_game_drawing();
+    
+    if(game.perf_mon) {
+        game.perf_mon->leave_state();
+    }
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Tick the gameplay logic by one frame.
+ */
+void gameplay::do_logic() {
+    if(game.perf_mon) {
+        if(is_input_allowed) {
+            //The first frame will have its speed all broken,
+            //because of the long loading time that came before it.
+            game.perf_mon->set_paused(false);
+            game.perf_mon->enter_state(PERF_MON_STATE_FRAME);
+        } else {
+            game.perf_mon->set_paused(true);
+        }
+    }
+    
+    if(game.maker_tools.change_speed) {
+        game.delta_t *= game.maker_tools.change_speed_mult;
+    }
+    
+    do_gameplay_logic();
+    do_aesthetic_logic();
+}
+
 
 const int FOG_BITMAP_SIZE = 128;
 
 /* ----------------------------------------------------------------------------
  * Generates the bitmap that'll draw the fog fade effect.
+ * near_radius:
+ *   Until this radius, the fog is not present.
+ * far_radius:
+ *   From this radius on, the fog is fully dense.
  */
 ALLEGRO_BITMAP* gameplay::generate_fog_bitmap(
     const float near_radius, const float far_radius
@@ -95,7 +183,7 @@ ALLEGRO_BITMAP* gameplay::generate_fog_bitmap(
                     point(x, y),
                     point(FOG_BITMAP_SIZE / 2.0, FOG_BITMAP_SIZE / 2.0)
                 ).to_float() / (FOG_BITMAP_SIZE / 2.0);
-            cur_ratio = min(cur_ratio, 1.0f);
+            cur_ratio = std::min(cur_ratio, 1.0f);
             //Then, map that ratio to a different ratio that considers
             //the start of the "near" section as 0.
             cur_ratio =
@@ -122,13 +210,26 @@ ALLEGRO_BITMAP* gameplay::generate_fog_bitmap(
 
 
 /* ----------------------------------------------------------------------------
+ * Returns the name of this state.
+ */
+string gameplay::get_name() const {
+    return "gameplay";
+}
+
+
+/* ----------------------------------------------------------------------------
  * Leaves the gameplay state, returning to the main menu, or wherever else.
  */
 void gameplay::leave() {
-    if(area_editor_quick_play_area.empty()) {
-        change_game_state(GAME_STATE_MAIN_MENU);
+    if(game.perf_mon) {
+        //Don't register the final frame, since it won't draw anything.
+        game.perf_mon->set_paused(true);
+    }
+    
+    if(game.states.area_editor_st->quick_play_area.empty()) {
+        game.change_state(game.states.main_menu_st);
     } else {
-        change_game_state(GAME_STATE_AREA_EDITOR);
+        game.change_state(game.states.area_editor_st);
     }
 }
 
@@ -137,7 +238,13 @@ void gameplay::leave() {
  * Loads the "gameplay" state into memory.
  */
 void gameplay::load() {
-    size_t errors_reported_at_start = errors_reported_today;
+    if(game.perf_mon) {
+        game.perf_mon->reset();
+        game.perf_mon->enter_state(PERF_MON_STATE_LOADING);
+        game.perf_mon->set_paused(false);
+    }
+    
+    size_t errors_reported_at_start = game.errors_reported_so_far;
     
     ready_for_input = false;
     
@@ -148,30 +255,33 @@ void gameplay::load() {
     load_game_content();
     
     //Initializing game things.
-    size_t n_spray_types = spray_types.size();
+    size_t n_spray_types = game.spray_types.size();
     for(size_t s = 0; s < n_spray_types; ++s) {
         spray_stats.push_back(spray_stats_struct());
     }
     
     load_area(area_to_load, false, false);
-    load_area_textures();
     
-    if(!cur_area_data.weather_condition.blackout_strength.empty()) {
-        lightmap_bmp = al_create_bitmap(scr_w, scr_h);
+    if(!game.cur_area_data.weather_condition.blackout_strength.empty()) {
+        lightmap_bmp = al_create_bitmap(game.win_w, game.win_h);
     }
-    if(!cur_area_data.weather_condition.fog_color.empty()) {
+    if(!game.cur_area_data.weather_condition.fog_color.empty()) {
         bmp_fog =
             generate_fog_bitmap(
-                cur_area_data.weather_condition.fog_near,
-                cur_area_data.weather_condition.fog_far
+                game.cur_area_data.weather_condition.fog_near,
+                game.cur_area_data.weather_condition.fog_far
             );
     }
     
     //Generate mobs.
+    if(game.perf_mon) {
+        game.perf_mon->start_measurement("Object generation");
+    }
+    
     vector<mob*> mobs_per_gen;
     
-    for(size_t m = 0; m < cur_area_data.mob_generators.size(); ++m) {
-        mob_gen* m_ptr = cur_area_data.mob_generators[m];
+    for(size_t m = 0; m < game.cur_area_data.mob_generators.size(); ++m) {
+        mob_gen* m_ptr = game.cur_area_data.mob_generators[m];
         
         mobs_per_gen.push_back(
             create_mob(
@@ -182,9 +292,9 @@ void gameplay::load() {
     }
     
     //Panic check -- If there are no leaders, abort.
-    if(leaders.empty()) {
+    if(mobs.leaders.empty()) {
         show_message_box(
-            display, "No leaders!", "No leaders!",
+            game.display, "No leaders!", "No leaders!",
             "This area has no leaders! You need at least one "
             "in order to play.",
             NULL, ALLEGRO_MESSAGEBOX_WARN
@@ -198,8 +308,8 @@ void gameplay::load() {
     //does not necessarily correspond to mob number X. Hence, we need
     //to keep the pointers to the created mobs in a vector, and use this
     //to link the mobs by (generator) number.
-    for(size_t m = 0; m < cur_area_data.mob_generators.size(); ++m) {
-        mob_gen* m_ptr = cur_area_data.mob_generators[m];
+    for(size_t m = 0; m < game.cur_area_data.mob_generators.size(); ++m) {
+        mob_gen* m_ptr = game.cur_area_data.mob_generators[m];
         
         for(size_t l = 0; l < m_ptr->link_nrs.size(); ++l) {
             mobs_per_gen[m]->links.push_back(mobs_per_gen[m_ptr->link_nrs[l]]);
@@ -208,78 +318,96 @@ void gameplay::load() {
     
     //Sort leaders.
     sort(
-        leaders.begin(), leaders.end(),
+        mobs.leaders.begin(), mobs.leaders.end(),
     [] (leader * l1, leader * l2) -> bool {
         size_t priority_l1 =
-        find(leader_order.begin(), leader_order.end(), l1->lea_type) -
-        leader_order.begin();
+        find(
+            game.config.leader_order.begin(),
+            game.config.leader_order.end(), l1->lea_type
+        ) -
+        game.config.leader_order.begin();
         size_t priority_l2 =
-        find(leader_order.begin(), leader_order.end(), l2->lea_type) -
-        leader_order.begin();
+        find(
+            game.config.leader_order.begin(),
+            game.config.leader_order.end(), l2->lea_type
+        ) -
+        game.config.leader_order.begin();
         return priority_l1 < priority_l2;
     }
     );
     
-    cur_leader_nr = 0;
-    cur_leader_ptr = leaders[cur_leader_nr];
-    cur_leader_ptr->fsm.set_state(LEADER_STATE_ACTIVE);
+    if(game.perf_mon) {
+        game.perf_mon->finish_measurement();
+    }
     
-    cam_pos = cam_final_pos = cur_leader_ptr->pos;
-    cam_zoom = cam_final_zoom = zoom_mid_level;
+    path_mgr.handle_area_load();
+    
+    cur_leader_nr = 0;
+    cur_leader_ptr = mobs.leaders[cur_leader_nr];
+    cur_leader_ptr->fsm.set_state(LEADER_STATE_ACTIVE);
+    cur_leader_ptr->active = true;
+    
+    game.cam.set_pos(cur_leader_ptr->pos);
+    game.cam.set_zoom(game.options.zoom_mid_level);
     update_transformations();
     
     ALLEGRO_MOUSE_STATE mouse_state;
     al_get_mouse_state(&mouse_state);
-    mouse_cursor_s.x = al_get_mouse_state_axis(&mouse_state, 0);
-    mouse_cursor_s.y = al_get_mouse_state_axis(&mouse_state, 1);
-    mouse_cursor_w = mouse_cursor_s;
+    game.mouse_cursor_s.x = al_get_mouse_state_axis(&mouse_state, 0);
+    game.mouse_cursor_s.y = al_get_mouse_state_axis(&mouse_state, 1);
+    game.mouse_cursor_w = game.mouse_cursor_s;
     al_transform_coordinates(
-        &screen_to_world_transform,
-        &mouse_cursor_w.x, &mouse_cursor_w.y
+        &game.screen_to_world_transform,
+        &game.mouse_cursor_w.x, &game.mouse_cursor_w.y
     );
-    leader_cursor_w = mouse_cursor_w;
-    leader_cursor_s = mouse_cursor_s;
+    leader_cursor_w = game.mouse_cursor_w;
+    leader_cursor_s = game.mouse_cursor_s;
+    
+    cursor_save_timer.on_end = [this] () {
+        cursor_save_timer.start();
+        cursor_spots.push_back(game.mouse_cursor_s);
+        if(cursor_spots.size() > CURSOR_SAVE_N_SPOTS) {
+            cursor_spots.erase(cursor_spots.begin());
+        }
+    };
+    cursor_save_timer.start();
     
     cur_leader_ptr->stop_whistling();
     
-    day_minutes = day_minutes_start;
-    area_time_passed = 0;
+    day_minutes = game.config.day_minutes_start;
+    area_time_passed = 0.0f;
     
-    vector<string> spray_amount_name_strs;
-    vector<string> spray_amount_value_strs;
-    get_var_vectors(
-        cur_area_data.spray_amounts,
-        spray_amount_name_strs, spray_amount_value_strs
-    );
-    
-    for(size_t s = 0; s < spray_amount_name_strs.size(); ++s) {
+    map<string, string> spray_strs =
+        get_var_map(game.cur_area_data.spray_amounts);
+        
+    for(auto &s : spray_strs) {
         size_t spray_id = 0;
-        for(; spray_id < spray_types.size(); ++spray_id) {
-            if(spray_types[spray_id].name == spray_amount_name_strs[s]) {
+        for(; spray_id < game.spray_types.size(); ++spray_id) {
+            if(game.spray_types[spray_id].name == s.first) {
                 break;
             }
         }
-        if(spray_id == spray_types.size()) {
+        if(spray_id == game.spray_types.size()) {
             log_error(
-                "Unknown spray type \"" + spray_amount_name_strs[s] + "\", "
+                "Unknown spray type \"" + s.first + "\", "
                 "while trying to set the starting number of sprays for "
-                "area \"" + cur_area_data.name + "\"!", NULL
+                "area \"" + game.cur_area_data.name + "\"!", NULL
             );
             continue;
         }
         
-        spray_stats[spray_id].nr_sprays = s2i(spray_amount_value_strs[s]);
+        spray_stats[spray_id].nr_sprays = s2i(s.second);
     }
     
-    for(size_t c = 0; c < controls[0].size(); ++c) {
-        if(controls[0][c].action == BUTTON_THROW) {
-            click_control_id = c;
+    for(size_t c = 0; c < game.options.controls[0].size(); ++c) {
+        if(game.options.controls[0][c].action == BUTTON_THROW) {
+            main_control_id = c;
             break;
         }
     }
-    for(size_t c = 0; c < controls[0].size(); ++c) {
-        if(controls[0][c].action == BUTTON_WHISTLE) {
-            whistle_control_id = c;
+    for(size_t c = 0; c < game.options.controls[0].size(); ++c) {
+        if(game.options.controls[0][c].action == BUTTON_WHISTLE) {
+            cancel_control_id = c;
             break;
         }
     }
@@ -300,22 +428,14 @@ void gameplay::load() {
     replay_timer.start();
     session_replay.clear();*/
     
-    al_hide_mouse_cursor(display);
+    al_hide_mouse_cursor(game.display);
     
     area_title_fade_timer.start();
     hud_items.start_move(true, AREA_INTRO_HUD_MOVE_TIME);
     
     //Aesthetic stuff.
-    cur_message_char_timer =
-        timer(
-            message_char_interval,
-    [] () {
-        cur_message_char_timer.start();
-        cur_message_char++;
-    }
-        );
-        
-    if(errors_reported_today > errors_reported_at_start) {
+    
+    if(game.errors_reported_so_far > errors_reported_at_start) {
         print_info(
             "\n\n\nERRORS FOUND!\n"
             "See \"" + ERROR_LOG_FILE_PATH + "\".\n\n\n",
@@ -323,9 +443,13 @@ void gameplay::load() {
         );
     }
     
-    framerate_last_avg_point = 0;
-    framerate_history.clear();
+    game.framerate_last_avg_point = 0;
+    game.framerate_history.clear();
     
+    if(game.perf_mon) {
+        game.perf_mon->set_area_name(game.cur_area_data.name);
+        game.perf_mon->leave_state();
+    }
 }
 
 
@@ -346,27 +470,43 @@ void gameplay::load_game_content() {
     load_mob_types(true);
     
     //Register leader sub-group types.
-    for(size_t p = 0; p < pikmin_order.size(); ++p) {
+    for(size_t p = 0; p < game.config.pikmin_order.size(); ++p) {
         subgroup_types.register_type(
-            SUBGROUP_TYPE_CATEGORY_PIKMIN, pikmin_order[p],
-            pikmin_order[p]->bmp_icon
+            SUBGROUP_TYPE_CATEGORY_PIKMIN, game.config.pikmin_order[p],
+            game.config.pikmin_order[p]->bmp_icon
         );
     }
     
     vector<string> tool_types_vector;
-    for(auto t = tool_types.begin(); t != tool_types.end(); ++t) {
-        tool_types_vector.push_back(t->first);
+    for(auto &t : game.mob_types.tool) {
+        tool_types_vector.push_back(t.first);
     }
     sort(tool_types_vector.begin(), tool_types_vector.end());
     for(size_t t = 0; t < tool_types_vector.size(); ++t) {
-        tool_type* tt_ptr = tool_types[tool_types_vector[t]];
+        tool_type* tt_ptr = game.mob_types.tool[tool_types_vector[t]];
         subgroup_types.register_type(
             SUBGROUP_TYPE_CATEGORY_TOOL, tt_ptr, tt_ptr->bmp_icon
         );
     }
     
     subgroup_types.register_type(SUBGROUP_TYPE_CATEGORY_LEADER);
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Loads HUD coordinates of a specific HUD item.
+ * item:
+ *   Item to load the coordinates for.
+ * data:
+ *   String containing the coordinate data.
+ */
+void gameplay::load_hud_coordinates(const int item, string data) {
+    vector<string> words = split(data);
+    if(data.size() < 4) return;
     
+    hud_items.set_item(
+        item, s2f(words[0]), s2f(words[1]), s2f(words[2]), s2f(words[3])
+    );
 }
 
 
@@ -376,6 +516,10 @@ void gameplay::load_game_content() {
 void gameplay::load_hud_info() {
     data_node file(MISC_FOLDER_PATH + "/HUD.txt");
     if(!file.file_was_opened) return;
+    
+    if(game.perf_mon) {
+        game.perf_mon->start_measurement("HUD info");
+    }
     
     //Hud coordinates.
     data_node* positions_node = file.get_child_by_name("positions");
@@ -420,10 +564,10 @@ void gameplay::load_hud_info() {
     
 #define loader(var, name) \
     var = \
-          bitmaps.get( \
-                       bitmaps_node->get_child_by_name(name)->value, \
-                       bitmaps_node->get_child_by_name(name) \
-                     );
+          game.bitmaps.get( \
+                            bitmaps_node->get_child_by_name(name)->value, \
+                            bitmaps_node->get_child_by_name(name) \
+                          );
     
     loader(bmp_bubble,                 "bubble");
     loader(bmp_counter_bubble_field,   "counter_bubble_field");
@@ -439,19 +583,9 @@ void gameplay::load_hud_info() {
     
 #undef loader
     
-}
-
-
-/* ----------------------------------------------------------------------------
- * Loads HUD coordinates of a specific HUD item.
- */
-void gameplay::load_hud_coordinates(const int item, string data) {
-    vector<string> words = split(data);
-    if(data.size() < 4) return;
-    
-    hud_items.set_item(
-        item, s2f(words[0]), s2f(words[1]), s2f(words[2]), s2f(words[3])
-    );
+    if(game.perf_mon) {
+        game.perf_mon->finish_measurement();
+    }
 }
 
 
@@ -459,15 +593,17 @@ void gameplay::load_hud_coordinates(const int item, string data) {
  * Unloads the "gameplay" state from memory.
  */
 void gameplay::unload() {
-    al_show_mouse_cursor(display);
+    al_show_mouse_cursor(game.display);
+    
+    path_mgr.clear();
     
     cur_leader_ptr = NULL;
     
-    cam_pos = cam_final_pos = point();
-    cam_zoom = cam_final_zoom = 1.0f;
+    game.cam.set_pos(point());
+    game.cam.set_zoom(1.0f);
     
-    while(!mobs.empty()) {
-        delete_mob(*mobs.begin(), true);
+    while(!mobs.all.empty()) {
+        delete_mob(*mobs.all.begin(), true);
     }
     
     if(lightmap_bmp) {
@@ -475,7 +611,6 @@ void gameplay::unload() {
         lightmap_bmp = NULL;
     }
     
-    unload_area_textures();
     unload_area();
     
     spray_stats.clear();
@@ -483,24 +618,24 @@ void gameplay::unload() {
     
     unload_game_content();
     
-    bitmaps.detach(bmp_bubble);
-    bitmaps.detach(bmp_counter_bubble_field);
-    bitmaps.detach(bmp_counter_bubble_group);
-    bitmaps.detach(bmp_counter_bubble_standby);
-    bitmaps.detach(bmp_counter_bubble_total);
-    bitmaps.detach(bmp_day_bubble);
-    bitmaps.detach(bmp_distant_pikmin_marker);
-    bitmaps.detach(bmp_hard_bubble);
-    bitmaps.detach(bmp_message_box);
-    bitmaps.detach(bmp_no_pikmin_bubble);
-    bitmaps.detach(bmp_sun);
+    game.bitmaps.detach(bmp_bubble);
+    game.bitmaps.detach(bmp_counter_bubble_field);
+    game.bitmaps.detach(bmp_counter_bubble_group);
+    game.bitmaps.detach(bmp_counter_bubble_standby);
+    game.bitmaps.detach(bmp_counter_bubble_total);
+    game.bitmaps.detach(bmp_day_bubble);
+    game.bitmaps.detach(bmp_distant_pikmin_marker);
+    game.bitmaps.detach(bmp_hard_bubble);
+    game.bitmaps.detach(bmp_message_box);
+    game.bitmaps.detach(bmp_no_pikmin_bubble);
+    game.bitmaps.detach(bmp_sun);
     if(bmp_fog) {
         al_destroy_bitmap(bmp_fog);
         bmp_fog = NULL;
     }
     
-    cur_message.clear();
-    info_print_text.clear();
+    if(msg_box) delete msg_box;
+    game.maker_tools.info_print_text.clear();
 }
 
 
@@ -508,7 +643,7 @@ void gameplay::unload() {
  * Unloads loaded game content.
  */
 void gameplay::unload_game_content() {
-    weather_conditions.clear();
+    unload_weather();
     
     subgroup_types.clear();
     
@@ -524,43 +659,108 @@ void gameplay::unload_game_content() {
 
 
 /* ----------------------------------------------------------------------------
+ * Updates the variable that indicates what the closest
+ * group member of the standby subgroup is.
+ * In the case all candidate members are out of reach,
+ * this gets set to the closest. Otherwise, it gets set to the closest
+ * and more mature one.
+ * NULL if there is no member of that subgroup available.
+ */
+void gameplay::update_closest_group_member() {
+    //Closest members so far for each maturity.
+    dist closest_dists[N_MATURITIES];
+    mob* closest_ptrs[N_MATURITIES];
+    for(unsigned char m = 0; m < N_MATURITIES; ++m) {
+        closest_ptrs[m] = NULL;
+    }
+    
+    game.states.gameplay_st->closest_group_member = NULL;
+    
+    //Fetch the closest, for each maturity.
+    size_t n_members = cur_leader_ptr->group->members.size();
+    for(size_t m = 0; m < n_members; ++m) {
+    
+        mob* member_ptr = cur_leader_ptr->group->members[m];
+        if(
+            member_ptr->subgroup_type_ptr !=
+            cur_leader_ptr->group->cur_standby_type
+        ) {
+            continue;
+        }
+        
+        unsigned char maturity = 0;
+        if(member_ptr->type->category->id == MOB_CATEGORY_PIKMIN) {
+            maturity = ((pikmin*) member_ptr)->maturity;
+        }
+        
+        dist d(cur_leader_ptr->pos, member_ptr->pos);
+        
+        if(!closest_ptrs[maturity] || d < closest_dists[maturity]) {
+            closest_dists[maturity] = d;
+            closest_ptrs[maturity] = member_ptr;
+        }
+    }
+    
+    //Now, try to get the one with the highest maturity within reach.
+    dist closest_dist;
+    for(unsigned char m = 0; m < N_MATURITIES; ++m) {
+        if(!closest_ptrs[2 - m]) continue;
+        if(closest_dists[2 - m] > game.config.group_member_grab_range) continue;
+        game.states.gameplay_st->closest_group_member = closest_ptrs[2 - m];
+        closest_dist = closest_dists[2 - m];
+        break;
+    }
+    
+    if(!game.states.gameplay_st->closest_group_member) {
+        //Couldn't find any within reach? Then just set it to the closest one.
+        //Maturity is irrelevant for this case.
+        for(unsigned char m = 0; m < N_MATURITIES; ++m) {
+            if(!closest_ptrs[m]) continue;
+            
+            if(
+                !game.states.gameplay_st->closest_group_member ||
+                closest_dists[m] < closest_dist
+            ) {
+                game.states.gameplay_st->closest_group_member = closest_ptrs[m];
+                closest_dist = closest_dists[m];
+            }
+        }
+        
+    }
+    
+    if(
+        fabs(
+            game.states.gameplay_st->closest_group_member->z -
+            cur_leader_ptr->z
+        ) >
+        SECTOR_STEP
+    ) {
+        //If the group member is beyond a step, it's obviously above or below
+        //a wall, compared to the leader. No grabbing allowed.
+        game.states.gameplay_st->closest_group_member_distant = true;
+    } else {
+        game.states.gameplay_st->closest_group_member_distant =
+            closest_dist > game.config.group_member_grab_range;
+    }
+}
+
+
+/* ----------------------------------------------------------------------------
  * Updates the transformations, with the current camera coordinates, zoom, etc.
  */
 void gameplay::update_transformations() {
     //World coordinates to screen coordinates.
-    world_to_screen_transform = identity_transform;
+    game.world_to_screen_transform = game.identity_transform;
     al_translate_transform(
-        &world_to_screen_transform,
-        -cam_pos.x + scr_w / 2.0 / cam_zoom,
-        -cam_pos.y + scr_h / 2.0 / cam_zoom
+        &game.world_to_screen_transform,
+        -game.cam.pos.x + game.win_w / 2.0 / game.cam.zoom,
+        -game.cam.pos.y + game.win_h / 2.0 / game.cam.zoom
     );
-    al_scale_transform(&world_to_screen_transform, cam_zoom, cam_zoom);
+    al_scale_transform(
+        &game.world_to_screen_transform, game.cam.zoom, game.cam.zoom
+    );
     
     //Screen coordinates to world coordinates.
-    screen_to_world_transform = world_to_screen_transform;
-    al_invert_transform(&screen_to_world_transform);
+    game.screen_to_world_transform = game.world_to_screen_transform;
+    al_invert_transform(&game.screen_to_world_transform);
 }
-
-
-/* ----------------------------------------------------------------------------
- * Tick the gameplay logic by one frame.
- */
-void gameplay::do_logic() {
-    if(creator_tool_change_speed) {
-        delta_t *= creator_tool_change_speed_mult;
-    }
-    
-    do_gameplay_logic();
-    do_aesthetic_logic();
-}
-
-
-/* ----------------------------------------------------------------------------
- * Draw the gameplay.
- */
-void gameplay::do_drawing() {
-    do_game_drawing();
-}
-
-
-gameplay::~gameplay() { }

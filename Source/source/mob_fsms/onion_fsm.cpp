@@ -11,19 +11,23 @@
 #include "onion_fsm.h"
 
 #include "../functions.h"
+#include "../game.h"
 #include "../mobs/onion.h"
+#include "../mobs/pellet.h"
 #include "../particle.h"
 #include "../utils/string_utils.h"
-#include "../vars.h"
+
 
 /* ----------------------------------------------------------------------------
  * Creates the finite state machine for the Onion's logic.
+ * typ:
+ *   Mob type to create the finite state machine for.
  */
 void onion_fsm::create_fsm(mob_type* typ) {
     easy_fsm_creator efc;
     
     efc.new_state("idling", ONION_STATE_IDLING); {
-        efc.new_event(MOB_EVENT_RECEIVE_DELIVERY); {
+        efc.new_event(MOB_EV_RECEIVE_DELIVERY); {
             efc.run(onion_fsm::receive_mob);
         }
     }
@@ -42,7 +46,12 @@ void onion_fsm::create_fsm(mob_type* typ) {
 
 /* ----------------------------------------------------------------------------
  * When an Onion finishes receiving a mob carried by Pikmin.
- * info1: Pointer to the mob.
+ * m:
+ *   The mob.
+ * info1:
+ *   Pointer to the mob being received.
+ * info2:
+ *   Unused.
  */
 void onion_fsm::receive_mob(mob* m, void* info1, void* info2) {
     engine_assert(info1 != NULL, m->print_state_history());
@@ -51,15 +60,19 @@ void onion_fsm::receive_mob(mob* m, void* info1, void* info2) {
     onion* o_ptr = (onion*) m;
     size_t seeds = 0;
     
-    if(delivery->type->category->id == MOB_CATEGORY_ENEMIES) {
+    switch(delivery->type->category->id) {
+    case MOB_CATEGORY_ENEMIES: {
         seeds = ((enemy*) delivery)->ene_type->pikmin_seeds;
-    } else if(delivery->type->category->id == MOB_CATEGORY_PELLETS) {
+        break;
+    } case MOB_CATEGORY_PELLETS: {
         pellet* p_ptr = (pellet*) delivery;
         if(p_ptr->pel_type->pik_type == o_ptr->oni_type->pik_type) {
             seeds = p_ptr->pel_type->match_seeds;
         } else {
             seeds = p_ptr->pel_type->non_match_seeds;
         }
+        break;
+    }
     }
     
     o_ptr->full_spew_timer.start();
@@ -67,10 +80,10 @@ void onion_fsm::receive_mob(mob* m, void* info1, void* info2) {
     o_ptr->spew_queue += seeds;
     
     particle p(
-        PARTICLE_TYPE_BITMAP, m->pos, m->z + m->type->height - 0.01,
+        PARTICLE_TYPE_BITMAP, m->pos, m->z + m->height - 0.01,
         24, 1.5, PARTICLE_PRIORITY_MEDIUM
     );
-    p.bitmap = bmp_smoke;
+    p.bitmap = game.sys_assets.bmp_smoke;
     particle_generator pg(0, p, 15);
     pg.number_deviation = 5;
     pg.angle = 0;
@@ -78,6 +91,6 @@ void onion_fsm::receive_mob(mob* m, void* info1, void* info2) {
     pg.total_speed = 70;
     pg.total_speed_deviation = 10;
     pg.duration_deviation = 0.5;
-    pg.emit(particles);
+    pg.emit(game.states.gameplay_st->particles);
     
 }

@@ -1,0 +1,36 @@
+name = Seesaw block
+
+area_editor_tips = Link this object to another seesaw block object, so they\nwork in tandem. Remember to link the other back to this one,\nand remember that one of them should start in a "down" position!\nRaised height: 128. Lowered height: 8.
+casts_shadow = false
+height = 128
+pushes = true
+radius = 90
+rectangular_dimensions = 220 180
+walkable = true
+
+spawns {
+    ropes {
+        object = Seesaw block ropes
+        relative = true
+        coordinates = 0 0
+        angle = 0
+    }
+}
+children {
+    ropes {
+        spawn = ropes
+        parent_holds = true
+        hold_rotation_method = never
+        hold_body_part = ropes
+        hold_offset_distance = 0
+        hold_offset_angle = 0
+    }
+}
+area_editor_properties {
+    Start down {
+        var = start_down
+        type = bool
+        def_value = false
+        tooltip = True if this block starts in the down position, false if it starts up.
+    }
+}

@@ -11,18 +11,18 @@
 #include "treasure_type.h"
 
 #include "../functions.h"
-#include "../mobs/mob.h"
-#include "../mobs/treasure.h"
 #include "../mob_fsms/gen_mob_fsm.h"
 #include "../mob_fsms/treasure_fsm.h"
+#include "../mobs/mob.h"
+#include "../mobs/treasure.h"
 #include "../utils/string_utils.h"
+
 
 /* ----------------------------------------------------------------------------
  * Creates a type of treasure.
  */
 treasure_type::treasure_type() :
-    mob_type(MOB_CATEGORY_TREASURES),
-    value(0) {
+    mob_type(MOB_CATEGORY_TREASURES) {
     
     target_type = MOB_TARGET_TYPE_NONE;
     
@@ -31,21 +31,10 @@ treasure_type::treasure_type() :
 
 
 /* ----------------------------------------------------------------------------
- * Loads parameters from a data file.
- */
-void treasure_type::load_parameters(data_node* file) {
-    value = s2f(file->get_child_by_name("value")->value);
-}
-
-
-/* ----------------------------------------------------------------------------
  * Returns the vector of animation conversions.
  */
-anim_conversion_vector treasure_type::get_anim_conversions() {
+anim_conversion_vector treasure_type::get_anim_conversions() const {
     anim_conversion_vector v;
-    v.push_back(make_pair(ANIM_IDLING, "idling"));
+    v.push_back(std::make_pair(ANIM_IDLING, "idling"));
     return v;
 }
-
-
-treasure_type::~treasure_type() { }

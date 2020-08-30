@@ -12,11 +12,12 @@
 
 #include "../const.h"
 #include "../functions.h"
-#include "../mobs/leader.h"
+#include "../game.h"
 #include "../mob_fsms/pikmin_fsm.h"
 #include "../mob_script.h"
+#include "../mobs/leader.h"
 #include "../utils/string_utils.h"
-#include "../vars.h"
+
 
 const float DEFAULT_SPROUT_EVOLUTION_TIME[N_MATURITIES] =
 { 2 * 60, 2 * 60, 3 * 60 };
@@ -27,13 +28,8 @@ const float DEFAULT_SPROUT_EVOLUTION_TIME[N_MATURITIES] =
 pikmin_type::pikmin_type() :
     mob_type(MOB_CATEGORY_PIKMIN),
     carry_strength(1),
-    throw_strength_mult(1.0),
-    max_throw_height(0),
-    has_onion(true),
-    can_dig(false),
-    can_fly(false),
-    can_swim(false),
-    can_latch(true),
+    push_strength(1),
+    max_throw_height(260),
     can_carry_tools(true),
     bmp_icon(nullptr) {
     
@@ -48,15 +44,15 @@ pikmin_type::pikmin_type() :
     
     mob_type::reach_struct idle_attack_reach;
     idle_attack_reach.angle_1 = TAU;
-    idle_attack_reach.radius_1 = idle_task_range;
+    idle_attack_reach.radius_1 = game.config.idle_task_range;
     reaches.push_back(idle_attack_reach);
-    mob_type::reach_struct group_move_attack_reach;
-    group_move_attack_reach.angle_1 = TAU;
-    group_move_attack_reach.radius_1 = group_move_task_range;
-    reaches.push_back(group_move_attack_reach);
+    mob_type::reach_struct swarm_attack_reach;
+    swarm_attack_reach.angle_1 = TAU;
+    swarm_attack_reach.radius_1 = game.config.swarm_task_range;
+    reaches.push_back(swarm_attack_reach);
     mob_type::reach_struct chase_reach;
     chase_reach.angle_1 = TAU;
-    chase_reach.radius_1 = pikmin_chase_range;
+    chase_reach.radius_1 = game.config.pikmin_chase_range;
     reaches.push_back(chase_reach);
     target_type = MOB_TARGET_TYPE_PLAYER;
     huntable_targets =
@@ -75,73 +71,108 @@ pikmin_type::pikmin_type() :
         MOB_TARGET_TYPE_EXPLODABLE_PIKMIN_OBSTACLE |
         MOB_TARGET_TYPE_FRAGILE;
         
+    area_editor_prop_struct aep_maturity;
+    aep_maturity.name = "Maturity";
+    aep_maturity.var = "maturity";
+    aep_maturity.type = AEMP_NUMBER_LIST;
+    aep_maturity.def_value = "2";
+    aep_maturity.value_list.push_back("Leaf");
+    aep_maturity.value_list.push_back("Bud");
+    aep_maturity.value_list.push_back("Flower");
+    aep_maturity.tooltip = "The Pikmin's starting maturity.";
+    area_editor_props.push_back(aep_maturity);
+    
+    area_editor_prop_struct aep_sprout;
+    aep_sprout.name = "Sprout";
+    aep_sprout.var = "sprout";
+    aep_sprout.type = AEMP_BOOL;
+    aep_sprout.def_value = "false";
+    aep_sprout.tooltip =
+        "True if this Pikmin spawns as a sprout, "
+        "false if it spawns as an idle Pikmin.";
+    area_editor_props.push_back(aep_sprout);
+    
     pikmin_fsm::create_fsm(this);
-}
-
-
-/* ----------------------------------------------------------------------------
- * Loads parameters from a data file.
- */
-void pikmin_type::load_parameters(data_node* file) {
-
-    reader_setter rs(file);
-    
-    rs.set("throw_strength_mult", throw_strength_mult);
-    rs.set("can_carry_tools", can_carry_tools);
-    rs.set("can_dig", can_dig);
-    rs.set("can_latch", can_latch);
-    rs.set("can_swim", can_swim);
-    rs.set("carry_strength", carry_strength);
-    rs.set("has_onion", has_onion);
-    
-    for(size_t m = 0; m < N_MATURITIES; ++m) {
-        rs.set("sprout_evolution_time_" + i2s(m + 1), sprout_evolution_time[m]);
-    }
-    
-    max_throw_height =
-        get_max_throw_height(get_throw_z_speed(throw_strength_mult));
-}
-
-
-/* ----------------------------------------------------------------------------
- * Loads resources into memory.
- */
-void pikmin_type::load_resources(data_node* file) {
-    bmp_top[0] =
-        bitmaps.get(file->get_child_by_name("top_leaf")->value, file);
-    bmp_top[1] =
-        bitmaps.get(file->get_child_by_name("top_bud")->value, file);
-    bmp_top[2] =
-        bitmaps.get(file->get_child_by_name("top_flower")->value, file);
-    bmp_icon =
-        bitmaps.get(file->get_child_by_name("icon")->value, file);
-    bmp_maturity_icon[0] =
-        bitmaps.get(file->get_child_by_name("icon_leaf")->value, file);
-    bmp_maturity_icon[1] =
-        bitmaps.get(file->get_child_by_name("icon_bud")->value, file);
-    bmp_maturity_icon[2] =
-        bitmaps.get(file->get_child_by_name("icon_flower")->value, file);
 }
 
 
 /* ----------------------------------------------------------------------------
  * Returns the vector of animation conversions.
  */
-anim_conversion_vector pikmin_type::get_anim_conversions() {
+anim_conversion_vector pikmin_type::get_anim_conversions() const {
     anim_conversion_vector v;
-    v.push_back(make_pair(PIKMIN_ANIM_IDLING,     "idling"));
-    v.push_back(make_pair(PIKMIN_ANIM_WALKING,    "walking"));
-    v.push_back(make_pair(PIKMIN_ANIM_THROWN,     "thrown"));
-    v.push_back(make_pair(PIKMIN_ANIM_ATTACKING,  "attacking"));
-    v.push_back(make_pair(PIKMIN_ANIM_GRABBING,   "grabbing"));
-    v.push_back(make_pair(PIKMIN_ANIM_SIGHING,    "sighing"));
-    v.push_back(make_pair(PIKMIN_ANIM_CARRYING,   "carrying"));
-    v.push_back(make_pair(PIKMIN_ANIM_SPROUT,     "sprout"));
-    v.push_back(make_pair(PIKMIN_ANIM_PLUCKING,   "plucking"));
-    v.push_back(make_pair(PIKMIN_ANIM_LYING,      "lying"));
-    v.push_back(make_pair(PIKMIN_ANIM_DRINKING,   "drinking"));
-    v.push_back(make_pair(PIKMIN_ANIM_PICKING_UP, "picking_up"));
+    v.push_back(std::make_pair(PIKMIN_ANIM_IDLING,     "idling"));
+    v.push_back(std::make_pair(PIKMIN_ANIM_WALKING,    "walking"));
+    v.push_back(std::make_pair(PIKMIN_ANIM_THROWN,     "thrown"));
+    v.push_back(std::make_pair(PIKMIN_ANIM_ATTACKING,  "attacking"));
+    v.push_back(std::make_pair(PIKMIN_ANIM_GRABBING,   "grabbing"));
+    v.push_back(std::make_pair(PIKMIN_ANIM_SIGHING,    "sighing"));
+    v.push_back(std::make_pair(PIKMIN_ANIM_CARRYING,   "carrying"));
+    v.push_back(std::make_pair(PIKMIN_ANIM_SPROUT,     "sprout"));
+    v.push_back(std::make_pair(PIKMIN_ANIM_PLUCKING,   "plucking"));
+    v.push_back(std::make_pair(PIKMIN_ANIM_LYING,      "lying"));
+    v.push_back(std::make_pair(PIKMIN_ANIM_DRINKING,   "drinking"));
+    v.push_back(std::make_pair(PIKMIN_ANIM_PICKING_UP, "picking_up"));
     return v;
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Loads properties from a data file.
+ * file:
+ *   File to read from.
+ */
+void pikmin_type::load_properties(data_node* file) {
+    reader_setter rs(file);
+    
+    rs.set("can_carry_tools", can_carry_tools);
+    rs.set("carry_strength", carry_strength);
+    rs.set("max_throw_height", max_throw_height);
+    rs.set("push_strength", push_strength);
+    rs.set("sprout_evolution_time_1", sprout_evolution_time[0]);
+    rs.set("sprout_evolution_time_2", sprout_evolution_time[1]);
+    rs.set("sprout_evolution_time_3", sprout_evolution_time[2]);
+}
+
+
+/* ----------------------------------------------------------------------------
+ * Loads resources into memory.
+ * file:
+ *   File to read from.
+ */
+void pikmin_type::load_resources(data_node* file) {
+    reader_setter rs(file);
+    
+    string top_leaf_str;
+    string top_bud_str;
+    string top_flower_str;
+    string icon_str;
+    string icon_leaf_str;
+    string icon_bud_str;
+    string icon_flower_str;
+    data_node* top_leaf_node = NULL;
+    data_node* top_bud_node = NULL;
+    data_node* top_flower_node = NULL;
+    data_node* icon_node = NULL;
+    data_node* icon_leaf_node = NULL;
+    data_node* icon_bud_node = NULL;
+    data_node* icon_flower_node = NULL;
+    
+    rs.set("icon", icon_str, &icon_node);
+    rs.set("icon_bud", icon_bud_str, &icon_bud_node);
+    rs.set("icon_flower", icon_flower_str, &icon_flower_node);
+    rs.set("icon_leaf", icon_leaf_str, &icon_leaf_node);
+    rs.set("top_bud", top_bud_str, &top_bud_node);
+    rs.set("top_flower", top_flower_str, &top_flower_node);
+    rs.set("top_leaf", top_leaf_str, &top_leaf_node);
+    
+    bmp_icon = game.bitmaps.get(icon_str, icon_node);
+    bmp_maturity_icon[0] = game.bitmaps.get(icon_leaf_str, icon_leaf_node);
+    bmp_maturity_icon[1] = game.bitmaps.get(icon_bud_str, icon_bud_node);
+    bmp_maturity_icon[2] = game.bitmaps.get(icon_flower_str, icon_flower_node);
+    bmp_top[0] = game.bitmaps.get(top_leaf_str, top_leaf_node);
+    bmp_top[1] = game.bitmaps.get(top_bud_str, top_bud_node);
+    bmp_top[2] = game.bitmaps.get(top_flower_str, top_flower_node);
 }
 
 
@@ -149,14 +180,11 @@ anim_conversion_vector pikmin_type::get_anim_conversions() {
  * Unloads resources from memory.
  */
 void pikmin_type::unload_resources() {
-    bitmaps.detach(bmp_top[0]);
-    bitmaps.detach(bmp_top[1]);
-    bitmaps.detach(bmp_top[2]);
-    bitmaps.detach(bmp_icon);
-    bitmaps.detach(bmp_maturity_icon[0]);
-    bitmaps.detach(bmp_maturity_icon[1]);
-    bitmaps.detach(bmp_maturity_icon[2]);
+    game.bitmaps.detach(bmp_icon);
+    game.bitmaps.detach(bmp_maturity_icon[0]);
+    game.bitmaps.detach(bmp_maturity_icon[1]);
+    game.bitmaps.detach(bmp_maturity_icon[2]);
+    game.bitmaps.detach(bmp_top[0]);
+    game.bitmaps.detach(bmp_top[1]);
+    game.bitmaps.detach(bmp_top[2]);
 }
-
-
-pikmin_type::~pikmin_type() { }
